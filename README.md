@@ -28,15 +28,6 @@ A professional, lightweight Single Page Application (SPA) for tracking employee 
 
 ---
 
-## Default Login Credentials
-
-| Role  | Username   | Password  |
-|-------|------------|-----------|
-| Admin | admin      | admin123  |
-| User  | john.doe   | user123   |
-
----
-
 ## Installation Instructions (XAMPP)
 
 1. **Clone or download** the project into your XAMPP `htdocs` folder, e.g. `C:/xampp/htdocs/best-employee-tracking/`.
