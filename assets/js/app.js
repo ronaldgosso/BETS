@@ -92,6 +92,7 @@ async function fetchUser() {
 
 // ----- Navigation -----
 function renderNavbar() {
+    document.querySelector('nav')?.remove();
     const nav = document.createElement('nav');
     nav.className = 'navbar navbar-expand-lg navbar-dark bg-primary mb-4';
     nav.innerHTML = `
