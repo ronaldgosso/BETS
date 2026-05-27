@@ -1,1 +1,21 @@
-<?php
+body {
+    background-color: #f8f9fa;
+}
+.navbar-brand {
+    font-weight: 600;
+}
+.card-stats {
+    border-left: 4px solid #0d6efd;
+}
+.table-actions i {
+    cursor: pointer;
+    margin: 0 5px;
+}
+.login-container {
+    max-width: 400px;
+    margin: 80px auto;
+}
+.btn-primary, .btn-outline-primary:hover {
+    background-color: #0d6efd;
+    border-color: #0d6efd;
+}
