@@ -41,7 +41,6 @@ switch ($method) {
         break;
 
     case 'PUT':
-        parse_str(file_get_contents('php://input'), $_PUT);
         if (empty($_GET['id'])) {
             jsonResponse(['error' => 'User ID required'], 400);
         }

@@ -52,7 +52,6 @@ switch ($method) {
 
     case 'PUT':
         // Update an entry: admin can update any, user can update own
-        parse_str(file_get_contents('php://input'), $_PUT);
         if (empty($_GET['id'])) {
             jsonResponse(['error' => 'Entry ID required'], 400);
         }
