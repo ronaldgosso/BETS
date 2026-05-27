@@ -11,17 +11,21 @@ switch ($method) {
         if ($user['role'] === 'admin') {
             if (isset($_GET['user_id']) && is_numeric($_GET['user_id'])) {
                 $stmt = $pdo->prepare("SELECT te.*, u.username FROM time_entries te 
-                                       JOIN users u ON te.user_id = u.id 
-                                       WHERE te.user_id = ? ORDER BY te.entry_date DESC, te.start_time DESC");
+                                        JOIN users u ON te.user_id = u.id 
+                                        LEFT JOIN projects p ON te.project_id = p.id
+                                        WHERE te.user_id = ? ORDER BY te.entry_date DESC, te.start_time DESC");
                 $stmt->execute([$_GET['user_id']]);
             } else {
                 $stmt = $pdo->query("SELECT te.*, u.username FROM time_entries te 
                                      JOIN users u ON te.user_id = u.id 
+                                     LEFT JOIN projects p ON te.project_id = p.id
                                      ORDER BY te.entry_date DESC, te.start_time DESC");
             }
         } else {
-            $stmt = $pdo->prepare("SELECT * FROM time_entries WHERE user_id = ? 
-                                   ORDER BY entry_date DESC, start_time DESC");
+            $stmt = $pdo->prepare("SELECT te.* FROM time_entries te 
+                                    LEFT JOIN projects p ON te.project_id = p.id
+                                    WHERE te.user_id = ? 
+                                    ORDER BY te.entry_date DESC, te.start_time DESC");
             $stmt->execute([$user['id']]);
         }
         $entries = $stmt->fetchAll();
@@ -31,16 +35,26 @@ switch ($method) {
     case 'POST':
         // Create new entry (user creates for themselves)
         $data = json_decode(file_get_contents('php://input'), true);
-        if (!$data || empty($data['project_name']) || empty($data['entry_date']) || 
-            empty($data['start_time']) || empty($data['end_time'])) {
-            jsonResponse(['error' => 'Required fields: project_name, entry_date, start_time, end_time'], 400);
+        if (!$data || empty($data['entry_date']) || empty($data['start_time']) || empty($data['end_time'])) {
+            jsonResponse(['error' => 'Required fields: entry_date, start_time, end_time (and project_id or project_name)'], 400);
         }
         
-        $stmt = $pdo->prepare("INSERT INTO time_entries (user_id, project_name, task_description, entry_date, start_time, end_time) 
-                               VALUES (?, ?, ?, ?, ?, ?)");
+        $projectName = $data['project_name'] ?? '';
+        if (!empty($data['project_id'])) {
+            $stmt = $pdo->prepare("SELECT name FROM projects WHERE id = ?");
+            $stmt->execute([$data['project_id']]);
+            $project = $stmt->fetch();
+            if ($project) {
+                $projectName = $project['name'];
+            }
+        }
+        
+        $stmt = $pdo->prepare("INSERT INTO time_entries (user_id, project_id, project_name, task_description, entry_date, start_time, end_time) 
+                               VALUES (?, ?, ?, ?, ?, ?, ?)");
         $stmt->execute([
             $user['id'],
-            $data['project_name'],
+            $data['project_id'] ?? null,
+            $projectName,
             $data['task_description'] ?? '',
             $data['entry_date'],
             $data['start_time'],
@@ -75,6 +89,17 @@ switch ($method) {
         
         $update = [];
         $params = [];
+        if (isset($data['project_id'])) {
+            $update[] = "project_id = ?";
+            $params[] = $data['project_id'];
+            $stmt = $pdo->prepare("SELECT name FROM projects WHERE id = ?");
+            $stmt->execute([$data['project_id']]);
+            $project = $stmt->fetch();
+            if ($project) {
+                $update[] = "project_name = ?";
+                $params[] = $project['name'];
+            }
+        }
         foreach (['project_name', 'task_description', 'entry_date', 'start_time', 'end_time'] as $field) {
             if (isset($data[$field])) {
                 $update[] = "$field = ?";
