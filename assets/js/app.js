@@ -9,7 +9,6 @@ async function route() {
     main.innerHTML = '';
     
     try {
-        // Check authentication and fetch user data
         if (hash !== 'login' && hash !== 'signup') {
             currentUser = await fetchUser();
             if (!currentUser) {
@@ -22,11 +21,12 @@ async function route() {
         return;
     }
 
-    // Render navigation if authenticated
+    // Render sidebar once for authenticated users
     if (currentUser && hash !== 'login' && hash !== 'signup') {
-        renderNavbar();
+        renderSidebar();
+        updateActiveNav(hash);
     } else {
-        document.querySelector('nav')?.remove();
+        document.getElementById('sidebar')?.remove();
     }
 
     switch (hash) {
@@ -91,31 +91,53 @@ async function fetchUser() {
 }
 
 // ----- Navigation -----
-function renderNavbar() {
-    document.querySelector('nav')?.remove();
-    const nav = document.createElement('nav');
-    nav.className = 'navbar navbar-expand-lg navbar-dark bg-primary mb-4';
-    nav.innerHTML = `
-        <div class="container">
-            <a class="navbar-brand" href="#dashboard">TrackPro</a>
-            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
-                <span class="navbar-toggler-icon"></span>
-            </button>
-            <div class="collapse navbar-collapse" id="navbarNav">
-                <ul class="navbar-nav me-auto">
-                    <li class="nav-item"><a class="nav-link" href="#dashboard">Dashboard</a></li>
-                    <li class="nav-item"><a class="nav-link" href="#entries">Time Entries</a></li>
-                    ${currentUser.role === 'admin' ? 
-                        '<li class="nav-item"><a class="nav-link" href="#admin/users">User Admin</a></li>' : ''}
-                </ul>
-                <span class="navbar-text text-white me-3">
-                    ${currentUser.username} (${currentUser.role})
-                </span>
-                <button class="btn btn-outline-light btn-sm" onclick="logout()">Logout</button>
+function renderSidebar() {
+    if (document.getElementById('sidebar')) return; // Already rendered
+    
+    const sidebarEl = document.createElement('div');
+    sidebarEl.id = 'sidebar';
+    sidebarEl.innerHTML = `
+        <div class="d-flex flex-column p-3 bg-dark text-white sidebar-content">
+            <a href="#dashboard" class="d-flex align-items-center mb-4 text-white text-decoration-none">
+                <i class="bi bi-clock-fill fs-4 me-2"></i>
+                <span class="fs-5 fw-semibold">TrackPro</span>
+            </a>
+            <ul class="nav nav-pills flex-column mb-auto">
+                <li class="nav-item mb-1">
+                    <a href="#dashboard" class="nav-link text-white" data-page="dashboard">
+                        <i class="bi bi-speedometer2 me-2"></i>Dashboard
+                    </a>
+                </li>
+                <li class="nav-item mb-1">
+                    <a href="#entries" class="nav-link text-white" data-page="entries">
+                        <i class="bi bi-journal-text me-2"></i>Time Entries
+                    </a>
+                </li>
+                ${currentUser.role === 'admin' ? 
+                    '<li class="nav-item mb-1"><a href="#admin/users" class="nav-link text-white" data-page="admin/users"><i class="bi bi-people me-2"></i>User Admin</a></li>' : ''}
+            </ul>
+            <hr class="text-white">
+            <div class="d-flex align-items-center mb-3">
+                <div class="bg-primary rounded-circle d-flex align-items-center justify-content-center me-2" style="width: 32px; height: 32px;">
+                    <i class="bi bi-person-fill small"></i>
+                </div>
+                <div>
+                    <div class="small">${currentUser.username}</div>
+                    <div class="small text-muted">${currentUser.role}</div>
+                </div>
             </div>
+            <button class="btn btn-outline-light btn-sm" onclick="logout()">
+                <i class="bi bi-box-arrow-right me-1"></i>Logout
+            </button>
         </div>
     `;
-    document.getElementById('app').prepend(nav);
+    document.getElementById('app').prepend(sidebarEl);
+}
+
+function updateActiveNav(page) {
+    document.querySelectorAll('#sidebar .nav-link').forEach(link => {
+        link.classList.toggle('active', link.getAttribute('data-page') === page);
+    });
 }
 
 // ----- Login Page -----
@@ -142,9 +164,6 @@ function renderLogin() {
             </form>
             <p class="text-center mt-3 mb-0">
                 <a href="#signup">Create an account</a>
-            </p>
-            <p class="text-center mt-2 mb-0 text-muted small">
-                Demo: admin / admin123 | john.doe / user123
             </p>
         </div>
     `;
