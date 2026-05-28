@@ -633,6 +633,7 @@ async function loadUsersForSelection(selectedIds = []) {
     const select = document.getElementById('user-ids-select');
     select.innerHTML = '';
     const users = await apiCall('users.php');
+    console.log('Available users for assignment:', users);
     users.forEach(u => {
         const selected = selectedIds.includes(u.id) ? 'selected' : '';
         select.innerHTML += `<option value="${u.id}" ${selected}>${u.username}</option>`;
@@ -642,6 +643,7 @@ async function loadUsersForSelection(selectedIds = []) {
 async function loadAssignedUsers(projectId) {
     try {
         const assignments = await apiCall(`assignments.php?project_id=${projectId}`);
+        console.log('Assigned users for project', projectId, ':', assignments);
         return assignments.map(a => a.id);
     } catch (err) {
         console.error('Failed to load assigned users:', err);
@@ -657,15 +659,22 @@ function showProjectForm(id = null, name = '', description = '', userIds = []) {
     form.name.value = name;
     form.description.value = description;
     
-    // Load users first, then show modal
     loadUsersForSelection(userIds);
     modal.show();
     
     const saveBtn = document.getElementById('save-project-btn');
     saveBtn.onclick = async () => {
         const f = document.getElementById('project-form');
-        const selectedUserIds = Array.from(f.user_ids.selectedOptions).map(o => parseInt(o.value));
+        const select = document.getElementById('user-ids-select');
+        const selectedUserIds = Array.from(select.selectedOptions).map(o => parseInt(o.value));
         console.log('Saving project - selected user_ids:', selectedUserIds);
+        console.log('Select element options count:', select.options.length);
+        
+        if (selectedUserIds.length === 0) {
+            alert('Please select at least one user to assign this project to.');
+            return;
+        }
+        
         const body = {
             name: f.name.value,
             description: f.description.value,
