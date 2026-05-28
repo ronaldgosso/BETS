@@ -28,10 +28,22 @@ switch ($method) {
             if ($currentUser['role'] !== 'admin' && $_GET['user_id'] != $currentUser['id']) {
                 jsonResponse(['error' => 'Access denied'], 403);
             }
+            // Debug: Check if user_projects table has any entries
+            $checkStmt = $pdo->query("SELECT COUNT(*) FROM user_projects");
+            $totalAssignments = $checkStmt->fetchColumn();
             $stmt = $pdo->prepare("SELECT p.id, p.name, p.description FROM projects p 
                                    JOIN user_projects up ON p.id = up.project_id 
                                    WHERE up.user_id = ?");
             $stmt->execute([$_GET['user_id']]);
+            $projects = $stmt->fetchAll();
+            // Add debug header to inspect in browser
+            header('X-Debug-Projects-Count: ' . count($projects));
+            header('X-Debug-User-Id: ' . $_GET['user_id']);
+            header('X-Debug-Total-Assignments: ' . $totalAssignments);
+            header('X-Debug-Is-Admin: ' . ($currentUser['role'] === 'admin' ? 'yes' : 'no'));
+            header('X-Debug-Current-User-Id: ' . $currentUser['id']);
+            jsonResponse($projects);
+            break;
         } else {
             // SECURITY: Only admins can view all assignments
             if ($currentUser['role'] !== 'admin') {
