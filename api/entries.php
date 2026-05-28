@@ -33,27 +33,37 @@ switch ($method) {
         break;
 
     case 'POST':
-        // Create new entry (user creates for themselves)
-        $data = json_decode(file_get_contents('php://input'), true);
-        if (!$data || empty($data['entry_date']) || empty($data['start_time']) || empty($data['end_time'])) {
-            jsonResponse(['error' => 'Required fields: entry_date, start_time, end_time (and project_id or project_name)'], 400);
+        // Create new entry (only non-admin users can create entries for themselves)
+        if ($user['role'] === 'admin') {
+            jsonResponse(['error' => 'Admins cannot create time entries. Entries are created by assigned users only.'], 403);
         }
         
-        $projectName = $data['project_name'] ?? '';
-        if (!empty($data['project_id'])) {
-            $stmt = $pdo->prepare("SELECT name FROM projects WHERE id = ?");
-            $stmt->execute([$data['project_id']]);
-            $project = $stmt->fetch();
-            if ($project) {
-                $projectName = $project['name'];
-            }
+        $data = json_decode(file_get_contents('php://input'), true);
+        if (!$data || empty($data['entry_date']) || empty($data['start_time']) || empty($data['end_time'])) {
+            jsonResponse(['error' => 'Required fields: entry_date, start_time, end_time, and project_id'], 400);
         }
+        
+        // Validate project_id is required
+        if (empty($data['project_id'])) {
+            jsonResponse(['error' => 'Project selection is required'], 400);
+        }
+        
+        // Non-admin users must have the project assigned to them
+        $stmt = $pdo->prepare("SELECT p.id, p.name FROM projects p 
+                               JOIN user_projects up ON p.id = up.project_id 
+                               WHERE up.user_id = ? AND p.id = ?");
+        $stmt->execute([$user['id'], $data['project_id']]);
+        $project = $stmt->fetch();
+        if (!$project) {
+            jsonResponse(['error' => 'No project assigned. Please contact the admin to assign a project.'], 400);
+        }
+        $projectName = $project['name'];
         
         $stmt = $pdo->prepare("INSERT INTO time_entries (user_id, project_id, project_name, task_description, entry_date, start_time, end_time) 
                                VALUES (?, ?, ?, ?, ?, ?, ?)");
         $stmt->execute([
             $user['id'],
-            $data['project_id'] ?? null,
+            $data['project_id'],
             $projectName,
             $data['task_description'] ?? '',
             $data['entry_date'],
@@ -65,21 +75,21 @@ switch ($method) {
         break;
 
     case 'PUT':
-        // Update an entry: admin can update any, user can update own
+        // Update an entry: only the user who owns the entry can update it
         if (empty($_GET['id'])) {
             jsonResponse(['error' => 'Entry ID required'], 400);
         }
         $entryId = $_GET['id'];
         
-        // Fetch entry to check ownership or admin
+        // Fetch entry to check ownership
         $stmt = $pdo->prepare("SELECT * FROM time_entries WHERE id = ?");
         $stmt->execute([$entryId]);
         $entry = $stmt->fetch();
         if (!$entry) {
             jsonResponse(['error' => 'Entry not found'], 404);
         }
-        if ($user['role'] !== 'admin' && $entry['user_id'] != $user['id']) {
-            jsonResponse(['error' => 'Forbidden'], 403);
+        if ($entry['user_id'] != $user['id']) {
+            jsonResponse(['error' => 'Forbidden - you can only edit your own entries'], 403);
         }
         
         $data = json_decode(file_get_contents('php://input'), true);
@@ -92,6 +102,17 @@ switch ($method) {
         if (isset($data['project_id'])) {
             $update[] = "project_id = ?";
             $params[] = $data['project_id'];
+            
+            // Validate project assignment
+            $stmt = $pdo->prepare("SELECT p.id, p.name FROM projects p 
+                                   JOIN user_projects up ON p.id = up.project_id 
+                                   WHERE up.user_id = ? AND p.id = ?");
+            $stmt->execute([$user['id'], $data['project_id']]);
+            $project = $stmt->fetch();
+            if (!$project) {
+                jsonResponse(['error' => 'This project is not assigned to you. Please contact the admin.'], 400);
+            }
+            
             $stmt = $pdo->prepare("SELECT name FROM projects WHERE id = ?");
             $stmt->execute([$data['project_id']]);
             $project = $stmt->fetch();
@@ -100,7 +121,7 @@ switch ($method) {
                 $params[] = $project['name'];
             }
         }
-        foreach (['project_name', 'task_description', 'entry_date', 'start_time', 'end_time'] as $field) {
+        foreach (['task_description', 'entry_date', 'start_time', 'end_time'] as $field) {
             if (isset($data[$field])) {
                 $update[] = "$field = ?";
                 $params[] = $data[$field];
@@ -126,8 +147,8 @@ switch ($method) {
         if (!$entry) {
             jsonResponse(['error' => 'Entry not found'], 404);
         }
-        if ($user['role'] !== 'admin' && $entry['user_id'] != $user['id']) {
-            jsonResponse(['error' => 'Forbidden'], 403);
+        if ($entry['user_id'] != $user['id']) {
+            jsonResponse(['error' => 'Forbidden - you can only delete your own entries'], 403);
         }
         $stmt = $pdo->prepare("DELETE FROM time_entries WHERE id = ?");
         $stmt->execute([$entryId]);

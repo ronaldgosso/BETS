@@ -49,6 +49,13 @@ async function route() {
             }
             renderAdminUsers();
             break;
+        case 'admin/projects':
+            if (currentUser?.role !== 'admin') {
+                location.hash = '#dashboard';
+                return;
+            }
+            renderAdminProjects();
+            break;
         default:
             location.hash = '#login';
     }
@@ -100,7 +107,7 @@ function renderSidebar() {
         <div class="d-flex flex-column p-3 bg-dark text-white sidebar-content">
             <a href="#dashboard" class="d-flex align-items-center mb-4 text-white text-decoration-none">
                 <i class="bi bi-clock-fill fs-4 me-2"></i>
-                <span class="fs-5 fw-semibold">TrackPro</span>
+                <span class="fs-5 fw-semibold">BETS</span>
             </a>
             <ul class="nav nav-pills flex-column mb-auto">
                 <li class="nav-item mb-1">
@@ -114,6 +121,7 @@ function renderSidebar() {
                     </a>
                 </li>
                 ${currentUser.role === 'admin' ? 
+                    '<li class="nav-item mb-1"><a href="#admin/projects" class="nav-link text-white" data-page="admin/projects"><i class="bi bi-folder me-2"></i>Projects</a></li>' +
                     '<li class="nav-item mb-1"><a href="#admin/users" class="nav-link text-white" data-page="admin/users"><i class="bi bi-people me-2"></i>User Admin</a></li>' : ''}
             </ul>
             <hr class="text-white">
@@ -364,13 +372,15 @@ async function renderDashboard() {
 }
 
 // ----- Time Entries Page -----
+let userProjects = [];
+
 async function renderEntries() {
     const main = document.getElementById('main-content');
     main.innerHTML = `<div class="d-flex justify-content-between align-items-center mb-4">
         <h2 class="mb-0">Time Entries</h2>
-        <button class="btn btn-primary" onclick="showEntryForm()">
-            <i class="bi bi-plus-lg me-1"></i>Add Entry
-        </button>
+        ${currentUser.role !== 'admin' ? 
+            '<button class="btn btn-primary" onclick="showEntryForm()" id="add-entry-btn">' +
+            '<i class="bi bi-plus-lg me-1"></i>Add Entry</button>' : ''}
     </div>
     <div id="entries-list">Loading...</div>
     <!-- Modal for add/edit -->
@@ -384,7 +394,7 @@ async function renderEntries() {
           <div class="modal-body">
             <form id="entry-form">
               <input type="hidden" name="id">
-              <div class="mb-3"><label class="form-label">Project Name</label><input type="text" name="project_name" class="form-control" required placeholder="Project name"></div>
+              <div class="mb-3"><label class="form-label">Project</label><select name="project_id" class="form-select" required id="project-select"></select></div>
               <div class="mb-3"><label class="form-label">Task Description</label><textarea name="task_description" class="form-control" placeholder="Optional task details"></textarea></div>
               <div class="mb-3"><label class="form-label">Date</label><input type="date" name="entry_date" class="form-control" required></div>
               <div class="row">
@@ -400,7 +410,29 @@ async function renderEntries() {
         </div>
       </div>
     </div>`;
+    await loadUserProjects();
     await loadEntriesList();
+    
+    // Disable Add Entry button if no projects assigned
+    const addBtn = document.getElementById('add-entry-btn');
+    if (addBtn && userProjects.length === 0) {
+        addBtn.disabled = true;
+        addBtn.title = 'No projects assigned. Please contact the admin.';
+    }
+}
+
+async function loadUserProjects() {
+    if (currentUser.role === 'admin') {
+        return;
+    }
+    try {
+        userProjects = await apiCall(`assignments.php?user_id=${currentUser.id}`);
+        if (userProjects.length === 0) {
+            document.getElementById('entries-list').innerHTML = '<div class="alert alert-warning">No project assigned. Please contact the admin to assign a project.</div>';
+        }
+    } catch (err) {
+        userProjects = [];
+    }
 }
 
 async function loadEntriesList() {
@@ -422,8 +454,10 @@ async function loadEntriesList() {
                 <td>${e.start_time}</td>
                 <td>${e.end_time}</td>
                 <td>
-                    <span class="text-primary me-2" onclick="editEntry(${e.id}, '${e.project_name}', '${e.task_description || ''}', '${e.entry_date}', '${e.start_time}', '${e.end_time}')" title="Edit"><i class="bi bi-pencil"></i></span>
-                    <span class="text-danger" onclick="deleteEntry(${e.id})" title="Delete"><i class="bi bi-trash"></i></span>
+                    ${currentUser.role !== 'admin' ? 
+                        `<span class="text-primary me-2" onclick="editEntry(${e.id}, ${e.project_id || ''}, '${e.task_description || ''}', '${e.entry_date}', '${e.start_time}', '${e.end_time}')" title="Edit"><i class="bi bi-pencil"></i></span>
+                        <span class="text-danger" onclick="deleteEntry(${e.id})" title="Delete"><i class="bi bi-trash"></i></span>` : ''
+                    }
                 </td>
             </tr>`;
         });
@@ -434,22 +468,34 @@ async function loadEntriesList() {
     }
 }
 
-function showEntryForm(id = null, project = '', task = '', date = '', start = '', end = '') {
+function showEntryForm(id = null, projectId = null, task = '', date = '', start = '', end = '') {
+    if (userProjects.length === 0) {
+        alert('No project assigned. Please contact the admin to assign a project.');
+        return;
+    }
+    
     const modal = new bootstrap.Modal(document.getElementById('entryModal'));
     document.getElementById('entryModalLabel').textContent = id ? 'Edit Entry' : 'Add Entry';
     const form = document.getElementById('entry-form');
     form.id.value = id || '';
-    form.project_name.value = project;
     form.task_description.value = task;
     form.entry_date.value = date;
     form.start_time.value = start;
     form.end_time.value = end;
     
+    const projectSelect = document.getElementById('project-select');
+    projectSelect.innerHTML = '';
+    projectSelect.innerHTML = '<option value="">Select a project</option>';
+    userProjects.forEach(p => {
+        const selected = p.id == projectId ? 'selected' : '';
+        projectSelect.innerHTML += `<option value="${p.id}" ${selected}>${p.name || p.project_name}</option>`;
+    });
+    
     const saveBtn = document.getElementById('save-entry-btn');
     saveBtn.onclick = async () => {
         const f = document.getElementById('entry-form');
         const body = {
-            project_name: f.project_name.value,
+            project_id: f.project_id.value,
             task_description: f.task_description.value,
             entry_date: f.entry_date.value,
             start_time: f.start_time.value,
@@ -470,8 +516,8 @@ function showEntryForm(id = null, project = '', task = '', date = '', start = ''
     modal.show();
 }
 
-function editEntry(id, project, task, date, start, end) {
-    showEntryForm(id, project, task, date, start, end);
+function editEntry(id, projectId, task, date, start, end) {
+    showEntryForm(id, projectId, task, date, start, end);
 }
 
 async function deleteEntry(id) {
@@ -479,6 +525,122 @@ async function deleteEntry(id) {
     try {
         await apiCall(`entries.php?id=${id}`, 'DELETE');
         loadEntriesList();
+    } catch (err) {
+        alert(err.message);
+    }
+}
+
+// ----- Admin Projects Page -----
+async function renderAdminProjects() {
+    const main = document.getElementById('main-content');
+    main.innerHTML = `<div class="d-flex justify-content-between align-items-center mb-4">
+        <h2 class="mb-0">Projects</h2>
+        <button class="btn btn-primary" onclick="showProjectForm()">
+            <i class="bi bi-plus-lg me-1"></i>Add Project
+        </button>
+    </div>
+    <div id="projects-list">Loading...</div>
+    <!-- Modal -->
+    <div class="modal fade" id="projectModal" tabindex="-1">
+      <div class="modal-dialog">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title" id="projectModalLabel">Add Project</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+          </div>
+          <div class="modal-body">
+            <form id="project-form">
+              <input type="hidden" name="id">
+              <div class="mb-3"><label class="form-label">Project Name</label><input type="text" name="name" class="form-control" required placeholder="Enter project name"></div>
+              <div class="mb-3"><label class="form-label">Description</label><textarea name="description" class="form-control" placeholder="Optional description"></textarea></div>
+            </form>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+            <button class="btn btn-primary" id="save-project-btn">Save</button>
+          </div>
+        </div>
+      </div>
+    </div>`;
+    await loadProjectsList();
+}
+
+async function loadProjectsList() {
+    const listDiv = document.getElementById('projects-list');
+    try {
+        const projects = await apiCall('projects.php');
+        let html = '<table class="table table-hover"><thead class="table-light"><tr><th>ID</th><th>Project Name</th><th>Description</th><th>Assigned Users</th><th>Created</th><th>Actions</th></tr></thead><tbody>';
+        for (const p of projects) {
+            const assignedUsers = p.assigned_users || 0;
+            html += `<tr>
+                <td>${p.id}</td>
+                <td>${p.name}</td>
+                <td>${p.description || ''}</td>
+                <td>${assignedUsers} user(s)</td>
+                <td>${p.created_at}</td>
+                <td>
+                    <span class="text-primary me-2" onclick="editProject(${p.id}, '${p.name}', '${p.description || ''}')" title="Edit"><i class="bi bi-pencil"></i></span>
+                    <span class="text-danger" onclick="deleteProject(${p.id})" title="Delete"><i class="bi bi-trash"></i></span>
+                </td>
+            </tr>`;
+        }
+        html += '</tbody></table>';
+        listDiv.innerHTML = html;
+    } catch (err) {
+        listDiv.innerHTML = `<div class="alert alert-danger">${err.message}</div>`;
+    }
+}
+
+async function loadUsersForSelection(selectedIds = []) {
+    const select = document.getElementById('user-ids-select');
+    select.innerHTML = '';
+    const users = await apiCall('users.php');
+    users.forEach(u => {
+        const selected = selectedIds.includes(u.id) ? 'selected' : '';
+        select.innerHTML += `<option value="${u.id}" ${selected}>${u.username}</option>`;
+    });
+}
+
+function showProjectForm(id = null, name = '', description = '', userIds = []) {
+    const modal = new bootstrap.Modal(document.getElementById('projectModal'));
+    document.getElementById('projectModalLabel').textContent = id ? 'Edit Project' : 'Add Project';
+    const form = document.getElementById('project-form');
+    form.id.value = id || '';
+    form.name.value = name;
+    form.description.value = description;
+    loadUsersForSelection(userIds);
+    
+    const saveBtn = document.getElementById('save-project-btn');
+    saveBtn.onclick = async () => {
+        const f = document.getElementById('project-form');
+        const body = {
+            name: f.name.value,
+            description: f.description.value
+        };
+        try {
+            if (f.id.value) {
+                await apiCall(`projects.php?id=${f.id.value}`, 'PUT', body);
+            } else {
+                await apiCall('projects.php', 'POST', body);
+            }
+            modal.hide();
+            loadProjectsList();
+        } catch (err) {
+            alert(err.message);
+        }
+    };
+    modal.show();
+}
+
+function editProject(id, name, description) {
+    showProjectForm(id, name, description);
+}
+
+async function deleteProject(id) {
+    if (!confirm('Delete this project?')) return;
+    try {
+        await apiCall(`projects.php?id=${id}`, 'DELETE');
+        loadProjectsList();
     } catch (err) {
         alert(err.message);
     }
