@@ -690,17 +690,9 @@ function showProjectForm(id = null, name = '', description = '', userIds = []) {
             modal.hide();
             loadProjectsList();
         } catch (err) {
-            alert(err.message);
+alert(err.message);
         }
     };
-}
-            modal.hide();
-            loadProjectsList();
-        } catch (err) {
-            alert(err.message);
-        }
-    };
-    modal.show();
 }
 
 function editProject(id, name, description) {
