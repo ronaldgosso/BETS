@@ -553,6 +553,11 @@ async function renderAdminProjects() {
               <input type="hidden" name="id">
               <div class="mb-3"><label class="form-label">Project Name</label><input type="text" name="name" class="form-control" required placeholder="Enter project name"></div>
               <div class="mb-3"><label class="form-label">Description</label><textarea name="description" class="form-control" placeholder="Optional description"></textarea></div>
+              <div class="mb-3"><label class="form-label">Assign to Users</label>
+                <select name="user_ids" class="form-select" multiple id="user-ids-select" style="height: 150px;">
+                </select>
+                <small class="text-muted">Hold Ctrl/Cmd to select multiple users</small>
+              </div>
             </form>
           </div>
           <div class="modal-footer">
@@ -615,7 +620,8 @@ function showProjectForm(id = null, name = '', description = '', userIds = []) {
         const f = document.getElementById('project-form');
         const body = {
             name: f.name.value,
-            description: f.description.value
+            description: f.description.value,
+            user_ids: Array.from(f.user_ids.selectedOptions).map(o => parseInt(o.value))
         };
         try {
             if (f.id.value) {
