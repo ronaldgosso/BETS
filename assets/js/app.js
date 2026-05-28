@@ -8,6 +8,8 @@ async function route() {
     const main = document.getElementById('main-content');
     main.innerHTML = '';
     
+    // SECURITY: Always verify authentication before rendering protected pages
+    // This prevents back-button access to cached protected content after logout
     try {
         if (hash !== 'login' && hash !== 'signup') {
             currentUser = await fetchUser();
@@ -20,13 +22,15 @@ async function route() {
         location.hash = '#login';
         return;
     }
-
-    // Render sidebar once for authenticated users
+    
+    // SECURITY: Clear sidebar and re-render for each navigation
+    // Ensures proper cleanup when accessing admin routes as regular user
+    document.getElementById('sidebar')?.remove();
+    
+    // Render sidebar for authenticated users
     if (currentUser && hash !== 'login' && hash !== 'signup') {
         renderSidebar();
         updateActiveNav(hash);
-    } else {
-        document.getElementById('sidebar')?.remove();
     }
 
     switch (hash) {
@@ -99,8 +103,8 @@ async function fetchUser() {
 
 // ----- Navigation -----
 function renderSidebar() {
-    if (document.getElementById('sidebar')) return; // Already rendered
-    
+    // SECURITY: Always re-render sidebar (removed early return)
+    // This ensures proper cleanup when user role changes or on back-button navigation
     const sidebarEl = document.createElement('div');
     sidebarEl.id = 'sidebar';
     sidebarEl.innerHTML = `

@@ -1,6 +1,9 @@
 <?php
 require_once __DIR__ . '/../includes/functions.php';
 
+// SECURITY: Prevent caching of login responses
+setNoCacheHeaders();
+
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     jsonResponse(['error' => 'Method not allowed'], 405);
 }
@@ -18,9 +21,13 @@ if (!$user || !verifyPassword($data['password'], $user['password'])) {
     jsonResponse(['error' => 'Invalid credentials'], 401);
 }
 
-// Regenerate session ID to prevent fixation
+// SECURITY: Regenerate session ID to prevent session fixation attacks
 session_regenerate_id(true);
+
+// SECURITY: Set session data with activity timestamp
 $_SESSION['user_id'] = $user['id'];
+$_SESSION['last_activity'] = time();
+$_SESSION['user_role'] = $user['role'];
 
 jsonResponse([
     'success' => true,

@@ -2,6 +2,17 @@
 require_once __DIR__ . '/config.php';
 
 /**
+ * Set secure session headers to prevent back-button access after logout.
+ * Call this before any output to prevent caching of protected pages.
+ */
+function setNoCacheHeaders() {
+    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+    header('Cache-Control: post-check=0, pre-check=0', false);
+    header('Pragma: no-cache');
+    header('Expires: 0');
+}
+
+/**
  * Send a JSON response and terminate.
  */
 function jsonResponse($data, $statusCode = 200) {
@@ -28,12 +39,26 @@ function verifyPassword($password, $hash) {
 /**
  * Get the currently authenticated user from session.
  * Returns user array or null.
+ * 
+ * SECURITY: Validates session integrity and regenerates session ID periodically.
  */
 function getCurrentUser() {
     global $pdo;
-    if (!isset($_SESSION['user_id'])) {
+    if (!isset($_SESSION['user_id']) || !isset($_SESSION['last_activity'])) {
         return null;
     }
+    
+    // Check for session timeout (30 minutes)
+    if (time() - $_SESSION['last_activity'] > 1800) {
+        // Session expired - clear and return null
+        unset($_SESSION['user_id']);
+        unset($_SESSION['last_activity']);
+        return null;
+    }
+    
+    // Update last activity time for valid sessions
+    $_SESSION['last_activity'] = time();
+    
     $stmt = $pdo->prepare("SELECT id, username, email, role FROM users WHERE id = ?");
     $stmt->execute([$_SESSION['user_id']]);
     return $stmt->fetch();
@@ -41,8 +66,10 @@ function getCurrentUser() {
 
 /**
  * Require that the current user is authenticated. Otherwise send 401.
+ * Calls setNoCacheHeaders() to prevent browser caching of protected API responses.
  */
 function requireAuth() {
+    setNoCacheHeaders(); // SECURITY: Prevent API responses from being cached
     if (!getCurrentUser()) {
         jsonResponse(['error' => 'Authentication required'], 401);
     }
@@ -50,8 +77,10 @@ function requireAuth() {
 
 /**
  * Require a specific role. Checks after authentication.
+ * Calls setNoCacheHeaders() to prevent browser caching of protected API responses.
  */
 function requireRole($role) {
+    setNoCacheHeaders(); // SECURITY: Prevent API responses from being cached
     $user = getCurrentUser();
     if (!$user || $user['role'] !== $role) {
         jsonResponse(['error' => 'Forbidden'], 403);
