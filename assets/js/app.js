@@ -651,11 +651,14 @@ function showProjectForm(id = null, name = '', description = '', userIds = []) {
     const saveBtn = document.getElementById('save-project-btn');
     saveBtn.onclick = async () => {
         const f = document.getElementById('project-form');
+        const selectedUserIds = Array.from(f.user_ids.selectedOptions).map(o => parseInt(o.value));
+        console.log('Saving project - selected user_ids:', selectedUserIds);
         const body = {
             name: f.name.value,
             description: f.description.value,
-            user_ids: Array.from(f.user_ids.selectedOptions).map(o => parseInt(o.value))
+            user_ids: selectedUserIds
         };
+        console.log('Request body:', body);
         try {
             if (f.id.value) {
                 await apiCall(`projects.php?id=${f.id.value}`, 'PUT', body);

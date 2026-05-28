@@ -1,19 +1,15 @@
 <?php
 require_once __DIR__ . '/../includes/functions.php';
 requireAuth();
-// Get the already-verified user from requireAuth()
 $currentUser = getCurrentUser();
 
 $method = $_SERVER['REQUEST_METHOD'];
 
 switch ($method) {
     case 'GET':
-        // SECURITY: Prevent caching of responses
         setNoCacheHeaders();
         
-        // Get all project assignments or assignments for a specific project
         if (isset($_GET['project_id']) && is_numeric($_GET['project_id'])) {
-            // SECURITY: Only admins can view assignments by project
             if ($currentUser['role'] !== 'admin') {
                 jsonResponse(['error' => 'Access denied'], 403);
             }
@@ -21,15 +17,21 @@ switch ($method) {
                                    JOIN user_projects up ON u.id = up.user_id 
                                    WHERE up.project_id = ?");
             $stmt->execute([$_GET['project_id']]);
+            $users = $stmt->fetchAll();
+            header('X-Debug-Type: project_assignments');
+            header('X-Debug-Count: ' . count($users));
+            jsonResponse($users);
         } else if (isset($_GET['user_id']) && is_numeric($_GET['user_id'])) {
-            // SECURITY: Users can only see their own assignments
             $requestedUserId = (int)$_GET['user_id'];
             if ($currentUser['role'] !== 'admin' && $requestedUserId !== $currentUser['id']) {
                 jsonResponse(['error' => 'Access denied'], 403);
             }
-            // Check if user_projects table has any entries for debugging
-            $checkStmt = $pdo->query("SELECT COUNT(*) FROM user_projects");
-            $totalAssignments = $checkStmt->fetchColumn();
+            $checkStmt = $pdo->prepare("SELECT COUNT(*) FROM user_projects WHERE user_id = ?");
+            $checkStmt->execute([$requestedUserId]);
+            $userAssignments = $checkStmt->fetchColumn();
+            
+            $totalStmt = $pdo->query("SELECT COUNT(*) FROM user_projects");
+            $totalAssignments = $totalStmt->fetchColumn();
             
             $stmt = $pdo->prepare("SELECT p.id, p.name, p.description FROM projects p 
                                    JOIN user_projects up ON p.id = up.project_id 
@@ -37,16 +39,15 @@ switch ($method) {
             $stmt->execute([$requestedUserId]);
             $projects = $stmt->fetchAll();
             
-            // Debug headers
             header('X-Debug-Projects-Count: ' . count($projects));
             header('X-Debug-Total-Assignments: ' . $totalAssignments);
             header('X-Debug-Current-User-Id: ' . $currentUser['id']);
             header('X-Debug-Requested-User-Id: ' . $requestedUserId);
+            header('X-Debug-User-Assignments-Count: ' . $userAssignments);
+            header('X-Debug-Type: user_projects');
             
             jsonResponse($projects);
-            break;
         } else {
-            // SECURITY: Only admins can view all assignments
             if ($currentUser['role'] !== 'admin') {
                 jsonResponse(['error' => 'Access denied'], 403);
             }
@@ -55,12 +56,11 @@ switch ($method) {
                                  JOIN users u ON up.user_id = u.id 
                                  JOIN projects p ON up.project_id = p.id 
                                  ORDER BY p.name, u.username");
+            jsonResponse($stmt->fetchAll());
         }
-        jsonResponse($stmt->fetchAll());
         break;
 
     case 'POST':
-        // Assign project to user
         $data = json_decode(file_get_contents('php://input'), true);
         if (!$data || empty($data['user_id']) || empty($data['project_id'])) {
             jsonResponse(['error' => 'user_id and project_id are required'], 400);
@@ -71,7 +71,6 @@ switch ($method) {
         break;
 
     case 'DELETE':
-        // Remove assignment
         if (empty($_GET['user_id']) || empty($_GET['project_id'])) {
             jsonResponse(['error' => 'user_id and project_id required'], 400);
         }
@@ -83,4 +82,3 @@ switch ($method) {
     default:
         jsonResponse(['error' => 'Method not allowed'], 405);
 }
-

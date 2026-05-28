@@ -30,12 +30,20 @@ switch ($method) {
         $stmt->execute([$data['name'], $data['description'] ?? '']);
         $projectId = $pdo->lastInsertId();
         
+        // Debug: log user_ids received
+        error_log("Project created with ID $projectId, user_ids: " . json_encode($data['user_ids'] ?? []));
+        
         if (!empty($data['user_ids']) && is_array($data['user_ids'])) {
             foreach ($data['user_ids'] as $userId) {
                 $stmt = $pdo->prepare("INSERT IGNORE INTO user_projects (user_id, project_id) VALUES (?, ?)");
                 $stmt->execute([$userId, $projectId]);
             }
         }
+        
+        // Verify assignments were created
+        $checkStmt = $pdo->prepare("SELECT COUNT(*) FROM user_projects WHERE project_id = ?");
+        $checkStmt->execute([$projectId]);
+        error_log("Assignments created for project $projectId: " . $checkStmt->fetchColumn());
         
         jsonResponse(['success' => true, 'id' => $projectId], 201);
         break;

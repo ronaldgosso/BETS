@@ -1,4 +1,23 @@
 <?php
+// Session cookie settings for proper session handling (must be set before session_start)
+// Note: session_set_cookie_params must be called before session_start
+$cookieParams = session_get_cookie_params();
+if ($cookieParams['lifetime'] !== 0 || $cookieParams['path'] !== '/' || $cookieParams['httponly'] !== true) {
+    session_set_cookie_params([
+        'lifetime' => 0,
+        'path' => '/',
+        'domain' => $_SERVER['HTTP_HOST'] ?? '',
+        'secure' => false,
+        'httponly' => true,
+        'samesite' => 'Lax'
+    ]);
+}
+
+// Start session if not already started
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+
 // Database configuration
 define('DB_HOST', 'localhost');
 define('DB_NAME', 'employee_tracking');
@@ -21,9 +40,4 @@ try {
     http_response_code(500);
     echo json_encode(['error' => 'Database connection failed']);
     exit;
-}
-
-// Start session if not already started
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
 }
