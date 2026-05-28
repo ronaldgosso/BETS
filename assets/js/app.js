@@ -639,6 +639,16 @@ async function loadUsersForSelection(selectedIds = []) {
     });
 }
 
+async function loadAssignedUsers(projectId) {
+    try {
+        const assignments = await apiCall(`assignments.php?project_id=${projectId}`);
+        return assignments.map(a => a.id);
+    } catch (err) {
+        console.error('Failed to load assigned users:', err);
+        return [];
+    }
+}
+
 function showProjectForm(id = null, name = '', description = '', userIds = []) {
     const modal = new bootstrap.Modal(document.getElementById('projectModal'));
     document.getElementById('projectModalLabel').textContent = id ? 'Edit Project' : 'Add Project';
@@ -646,7 +656,10 @@ function showProjectForm(id = null, name = '', description = '', userIds = []) {
     form.id.value = id || '';
     form.name.value = name;
     form.description.value = description;
+    
+    // Load users first, then show modal
     loadUsersForSelection(userIds);
+    modal.show();
     
     const saveBtn = document.getElementById('save-project-btn');
     saveBtn.onclick = async () => {
@@ -671,11 +684,20 @@ function showProjectForm(id = null, name = '', description = '', userIds = []) {
             alert(err.message);
         }
     };
+}
+            modal.hide();
+            loadProjectsList();
+        } catch (err) {
+            alert(err.message);
+        }
+    };
     modal.show();
 }
 
 function editProject(id, name, description) {
-    showProjectForm(id, name, description);
+    loadAssignedUsers(id).then(userIds => {
+        showProjectForm(id, name, description, userIds);
+    });
 }
 
 async function deleteProject(id) {

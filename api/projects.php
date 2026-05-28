@@ -22,7 +22,12 @@ switch ($method) {
         break;
 
     case 'POST':
-        $data = json_decode(file_get_contents('php://input'), true);
+        $rawInput = file_get_contents('php://input');
+        error_log("Raw input: $rawInput");
+        
+        $data = json_decode($rawInput, true);
+        error_log("Parsed data: " . json_encode($data));
+        
         if (!$data || empty($data['name'])) {
             jsonResponse(['error' => 'Project name is required'], 400);
         }
@@ -30,8 +35,7 @@ switch ($method) {
         $stmt->execute([$data['name'], $data['description'] ?? '']);
         $projectId = $pdo->lastInsertId();
         
-        // Debug: log user_ids received
-        error_log("Project created with ID $projectId, user_ids: " . json_encode($data['user_ids'] ?? []));
+        error_log("Project created: ID=$projectId, name={$data['name']}, user_ids received: " . json_encode($data['user_ids'] ?? 'none'));
         
         if (!empty($data['user_ids']) && is_array($data['user_ids'])) {
             foreach ($data['user_ids'] as $userId) {
@@ -40,10 +44,9 @@ switch ($method) {
             }
         }
         
-        // Verify assignments were created
         $checkStmt = $pdo->prepare("SELECT COUNT(*) FROM user_projects WHERE project_id = ?");
         $checkStmt->execute([$projectId]);
-        error_log("Assignments created for project $projectId: " . $checkStmt->fetchColumn());
+        error_log("Assignments for project $projectId: " . $checkStmt->fetchColumn());
         
         jsonResponse(['success' => true, 'id' => $projectId], 201);
         break;

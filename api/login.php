@@ -29,16 +29,17 @@ $_SESSION['user_id'] = $user['id'];
 $_SESSION['last_activity'] = time();
 $_SESSION['user_role'] = $user['role'];
 
-// Debug: Log session info
+// Debug: Log session info (must be before jsonResponse which exits)
 header('X-Debug-Session-Id: ' . session_id());
 header('X-Debug-User-Id: ' . $user['id']);
 header('X-Debug-Auth: success');
 
-jsonResponse([
+$result = [
     'success' => true,
     'user' => [
         'id' => $user['id'],
         'username' => $user['username'],
         'role' => $user['role']
     ]
-]);
+];
+jsonResponse($result);
