@@ -1,5 +1,9 @@
 <?php
 require_once __DIR__ . '/../includes/functions.php';
+
+// SECURITY: Prevent caching of entries data
+setNoCacheHeaders();
+
 requireAuth();
 
 $user = getCurrentUser();

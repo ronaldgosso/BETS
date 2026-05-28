@@ -73,6 +73,7 @@ async function apiCall(endpoint, method = 'GET', body = null) {
     const options = {
         method,
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include'
     };
     if (body) options.body = JSON.stringify(body);
     const res = await fetch(API_BASE + endpoint, options);
@@ -86,7 +87,12 @@ async function apiCall(endpoint, method = 'GET', body = null) {
         throw new Error('Forbidden');
     }
     if (!res.ok) {
-        const err = await res.json();
+        let err;
+        try {
+            err = await res.json();
+        } catch {
+            throw new Error(`Request failed (${res.status})`);
+        }
         throw new Error(err.error || 'Request failed');
     }
     return res.json();
@@ -433,7 +439,9 @@ async function loadUserProjects() {
     }
     try {
         userProjects = await apiCall(`assignments.php?user_id=${currentUser.id}`);
+        console.log('Loaded projects:', userProjects);
     } catch (err) {
+        console.error('Failed to load projects:', err.message);
         userProjects = [];
     }
 }
