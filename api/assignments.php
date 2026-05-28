@@ -1,17 +1,15 @@
 <?php
 require_once __DIR__ . '/../includes/functions.php';
 requireAuth();
-// SECURITY: Allow both admin and user access
-// - Admin can view all assignments or by project_id
-// - Users can only view their own assignments (user_id filter)
+// Get the already-verified user from requireAuth()
+$currentUser = getCurrentUser();
 
 $method = $_SERVER['REQUEST_METHOD'];
 
 switch ($method) {
     case 'GET':
-        // SECURITY: Non-admin users can only see their own assignments
-        setNoCacheHeaders(); // SECURITY: Prevent API responses from being cached
-        $currentUser = getCurrentUser();
+        // SECURITY: Prevent caching of responses
+        setNoCacheHeaders();
         
         // Get all project assignments or assignments for a specific project
         if (isset($_GET['project_id']) && is_numeric($_GET['project_id'])) {
@@ -25,23 +23,26 @@ switch ($method) {
             $stmt->execute([$_GET['project_id']]);
         } else if (isset($_GET['user_id']) && is_numeric($_GET['user_id'])) {
             // SECURITY: Users can only see their own assignments
-            if ($currentUser['role'] !== 'admin' && $_GET['user_id'] != $currentUser['id']) {
+            $requestedUserId = (int)$_GET['user_id'];
+            if ($currentUser['role'] !== 'admin' && $requestedUserId !== $currentUser['id']) {
                 jsonResponse(['error' => 'Access denied'], 403);
             }
-            // Debug: Check if user_projects table has any entries
+            // Check if user_projects table has any entries for debugging
             $checkStmt = $pdo->query("SELECT COUNT(*) FROM user_projects");
             $totalAssignments = $checkStmt->fetchColumn();
+            
             $stmt = $pdo->prepare("SELECT p.id, p.name, p.description FROM projects p 
                                    JOIN user_projects up ON p.id = up.project_id 
                                    WHERE up.user_id = ?");
-            $stmt->execute([$_GET['user_id']]);
+            $stmt->execute([$requestedUserId]);
             $projects = $stmt->fetchAll();
-            // Add debug header to inspect in browser
+            
+            // Debug headers
             header('X-Debug-Projects-Count: ' . count($projects));
-            header('X-Debug-User-Id: ' . $_GET['user_id']);
             header('X-Debug-Total-Assignments: ' . $totalAssignments);
-            header('X-Debug-Is-Admin: ' . ($currentUser['role'] === 'admin' ? 'yes' : 'no'));
             header('X-Debug-Current-User-Id: ' . $currentUser['id']);
+            header('X-Debug-Requested-User-Id: ' . $requestedUserId);
+            
             jsonResponse($projects);
             break;
         } else {

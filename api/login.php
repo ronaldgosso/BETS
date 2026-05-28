@@ -29,6 +29,11 @@ $_SESSION['user_id'] = $user['id'];
 $_SESSION['last_activity'] = time();
 $_SESSION['user_role'] = $user['role'];
 
+// Debug: Log session info
+header('X-Debug-Session-Id: ' . session_id());
+header('X-Debug-User-Id: ' . $user['id']);
+header('X-Debug-Auth: success');
+
 jsonResponse([
     'success' => true,
     'user' => [

@@ -77,14 +77,19 @@ async function apiCall(endpoint, method = 'GET', body = null) {
     };
     if (body) options.body = JSON.stringify(body);
     const res = await fetch(API_BASE + endpoint, options);
-    // Log response headers for debugging
-    console.log('API Response Headers for', endpoint, ':', {
+    
+    // Log debug headers
+    console.log('Response debug headers:', {
         'X-Debug-Projects-Count': res.headers.get('X-Debug-Projects-Count'),
-        'X-Debug-User-Id': res.headers.get('X-Debug-User-Id'),
         'X-Debug-Total-Assignments': res.headers.get('X-Debug-Total-Assignments'),
-        'X-Debug-Is-Admin': res.headers.get('X-Debug-Is-Admin'),
-        'X-Debug-Current-User-Id': res.headers.get('X-Debug-Current-User-Id')
+        'X-Debug-Current-User-Id': res.headers.get('X-Debug-Current-User-Id'),
+        'X-Debug-Requested-User-Id': res.headers.get('X-Debug-Requested-User-Id'),
+        'X-Debug-Session-Id': res.headers.get('X-Debug-Session-Id'),
+        'X-Debug-Auth': res.headers.get('X-Debug-Auth'),
+        'X-Debug-User-Id': res.headers.get('X-Debug-User-Id'),
+        status: res.status
     });
+    
     if (res.status === 401) {
         currentUser = null;
         location.hash = '#login';
@@ -446,15 +451,10 @@ async function loadUserProjects() {
         return;
     }
     try {
+        console.log('Fetching projects for user_id:', currentUser.id);
         const response = await apiCall(`assignments.php?user_id=${currentUser.id}`);
-        userProjects = response;
-        console.log('Loaded projects for user', currentUser.id, ':', response);
-        console.log('Response type:', typeof response, 'Is array:', Array.isArray(response));
-        // Log response headers for debugging
-        const debugHeaders = ['X-Debug-Projects-Count', 'X-Debug-User-Id', 'X-Debug-Total-Assignments', 'X-Debug-Is-Admin', 'X-Debug-Current-User-Id'];
-        debugHeaders.forEach(h => {
-            const val = document.head.querySelector(`meta[name="${h}"]`)?.content || 'check Network tab';
-        });
+        console.log('Raw response:', response);
+        userProjects = Array.isArray(response) ? response : [];
     } catch (err) {
         console.error('Failed to load projects:', err.message);
         userProjects = [];
