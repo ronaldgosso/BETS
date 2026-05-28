@@ -426,14 +426,13 @@ async function renderEntries() {
 }
 
 async function loadUserProjects() {
+    // SECURITY: Only load projects for non-admin users
+    // Admin users see all entries but don't create them
     if (currentUser.role === 'admin') {
         return;
     }
     try {
         userProjects = await apiCall(`assignments.php?user_id=${currentUser.id}`);
-        if (userProjects.length === 0) {
-            document.getElementById('entries-list').innerHTML = '<div class="alert alert-warning">No project assigned. Please contact the admin to assign a project.</div>';
-        }
     } catch (err) {
         userProjects = [];
     }
@@ -441,6 +440,13 @@ async function loadUserProjects() {
 
 async function loadEntriesList() {
     const listDiv = document.getElementById('entries-list');
+    
+    // SECURITY: Show warning if user has no projects assigned (non-admins only)
+    if (currentUser.role !== 'admin' && userProjects.length === 0) {
+        listDiv.innerHTML = '<div class="alert alert-warning">No project assigned. Please contact the admin to assign a project.</div>';
+        return;
+    }
+    
     try {
         const entries = await apiCall('entries.php');
         if (entries.length === 0) {
