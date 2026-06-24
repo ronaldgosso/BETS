@@ -6,6 +6,10 @@
 @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap');
 
 :root {
+    --bg-color: #09090b;
+    --bg-radial-1: rgba(139, 92, 246, 0.1);
+    --bg-radial-2: rgba(6, 182, 212, 0.1);
+
     --sidebar-width: 280px;
     --sidebar-bg: rgba(10, 10, 14, 0.65);
     --sidebar-border: rgba(255, 255, 255, 0.05);
@@ -27,8 +31,9 @@
     --border-light: rgba(255, 255, 255, 0.1);
     
     --text-primary: #f8fafc;
-    --text-secondary: #94a3b8;
-    --text-muted: #64748b;
+    --text-secondary: #cbd5e1;
+    --text-muted: #94a3b8;
+    --text-inverse: #0f172a;
     
     --shadow-sm: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
     --shadow-md: 0 10px 15px -3px rgba(0, 0, 0, 0.2), 0 4px 6px -2px rgba(0, 0, 0, 0.1);
@@ -42,15 +47,44 @@
     --glass-blur: blur(20px);
 }
 
+[data-theme="light"] {
+    --bg-color: #f8fafc;
+    --bg-radial-1: rgba(139, 92, 246, 0.12);
+    --bg-radial-2: rgba(6, 182, 212, 0.12);
+    
+    --sidebar-bg: rgba(255, 255, 255, 0.7);
+    --sidebar-border: rgba(0, 0, 0, 0.06);
+    
+    --accent: #7c3aed;
+    --accent-light: #8b5cf6;
+    --accent-glow: rgba(124, 58, 237, 0.2);
+    --accent2: #0891b2;
+    
+    --surface: rgba(255, 255, 255, 0.65);
+    --surface-2: rgba(255, 255, 255, 0.85);
+    --surface-solid: #ffffff;
+    --border: rgba(0, 0, 0, 0.08);
+    --border-light: rgba(0, 0, 0, 0.15);
+    
+    --text-primary: #0f172a;
+    --text-secondary: #475569;
+    --text-muted: #94a3b8;
+    --text-inverse: #ffffff;
+    
+    --shadow-sm: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+    --shadow-md: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -2px rgba(0, 0, 0, 0.04);
+    --shadow-lg: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+}
+
 /* ---- Base ---- */
 *, *::before, *::after { box-sizing: border-box; }
 html { scroll-behavior: smooth; }
 
 body {
-    background: #09090b;
+    background: var(--bg-color);
     background-image: 
-        radial-gradient(circle at 15% 50%, rgba(139, 92, 246, 0.1), transparent 25%),
-        radial-gradient(circle at 85% 30%, rgba(6, 182, 212, 0.1), transparent 25%);
+        radial-gradient(circle at 15% 50%, var(--bg-radial-1), transparent 25%),
+        radial-gradient(circle at 85% 30%, var(--bg-radial-2), transparent 25%);
     background-attachment: fixed;
     min-height: 100vh;
     font-family: 'Outfit', 'Inter', system-ui, -apple-system, sans-serif;
@@ -61,7 +95,11 @@ body {
     -webkit-font-smoothing: antialiased;
 }
 
-#app { min-height: 100vh; }
+#app { min-height: 100vh; display: flex; }
+
+/* Bootstrap overrides for theme compatibility */
+.text-muted { color: var(--text-muted) !important; }
+.text-secondary { color: var(--text-secondary) !important; }
 
 /* ---- Auth page background ---- */
 body.auth-page {
@@ -935,22 +973,63 @@ h1, h2, h3, h4, h5 { font-weight: 700; letter-spacing: -0.5px; color: #fff; }
 }
 
 /* ====================================================
+   MOBILE HEADER & OVERLAY
+   ==================================================== */
+#mobile-menu-toggle {
+    position: fixed;
+    top: 15px;
+    right: 15px;
+    z-index: 1040;
+    background: var(--surface);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    width: 42px;
+    height: 42px;
+    display: none; /* Hidden on desktop */
+    align-items: center;
+    justify-content: center;
+    font-size: 1.5rem;
+    cursor: pointer;
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    box-shadow: var(--shadow-md);
+}
+
+#mobile-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.6);
+    z-index: 1045;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--transition);
+}
+#mobile-overlay.show {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+/* ====================================================
    RESPONSIVE
    ==================================================== */
 @media (max-width: 768px) {
+    #mobile-menu-toggle { display: flex; }
+    
     .sidebar-content {
         position: fixed;
         top: 0; left: 0;
         height: 100vh;
+        width: 280px;
         transform: translateX(-100%);
         transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
         z-index: 1050;
-        background: rgba(10, 10, 14, 0.95);
+        background: var(--surface-solid);
     }
     
     .sidebar-content.show { transform: translateX(0); }
     
-    #main-content { padding: 24px 16px !important; }
+    #main-content { padding: 80px 16px 24px 16px !important; }
     
     .auth-card { padding: 32px 24px; }
     .stat-card-value { font-size: 1.8rem; }

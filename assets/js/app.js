@@ -14,6 +14,19 @@
 const API_BASE = 'api/';
 let currentUser = null; // Populated after every authenticated route change
 let csrfToken = null;
+let currentAdminTimeframe = 'all';
+
+// Apply initial theme immediately to prevent flash
+window.getInitialTheme = function() {
+    const saved = localStorage.getItem('theme');
+    if (saved) return saved;
+    return window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+};
+window.applyTheme = function(theme) {
+    if (theme === 'light') document.documentElement.setAttribute('data-theme', 'light');
+    else document.documentElement.removeAttribute('data-theme');
+};
+applyTheme(getInitialTheme());
 
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -38,11 +51,16 @@ async function route() {
     }
 
     // Toggle the special animated background used on auth pages
-    document.body.classList.toggle('auth-page', hash === 'login' || hash === 'signup');
+    const isAuth = hash === 'login' || hash === 'signup';
+    document.body.classList.toggle('auth-page', isAuth);
+    
+    // Hide mobile menu toggle on auth pages
+    const mobileBtn = document.getElementById('mobile-menu-toggle');
+    if (mobileBtn) mobileBtn.style.display = isAuth ? 'none' : '';
 
     // Rebuild the sidebar on every navigation so role-based links are always fresh.
     // The old #sidebar element is removed completely before re-rendering.
-    document.getElementById('sidebar')?.remove();
+    document.querySelectorAll('#sidebar').forEach(el => el.remove());
     if (currentUser && hash !== 'login' && hash !== 'signup') {
         renderSidebar();
         updateActiveNav(hash);
@@ -65,6 +83,9 @@ async function route() {
         case 'admin/assignments':
             if (currentUser?.role !== 'admin') { location.hash = '#dashboard'; return; }
             renderAdminAssignments();
+            break;
+        case 'settings':
+            renderSettings();
             break;
         default:
             location.hash = '#login';
@@ -191,8 +212,12 @@ function skeletonRows(n = 5) {
 // ══════════════════════════════════════════════════════════════════════════════
 
 function renderSidebar() {
-    // Generate initials from the username for the avatar circle
-    const initials = (currentUser.username || '?').slice(0, 2).toUpperCase();
+    let avatarHtml;
+    if (currentUser.profile_pic) {
+        avatarHtml = `<img src="${currentUser.profile_pic}" alt="Profile" style="width: 100%; height: 100%; object-fit: cover;">`;
+    } else {
+        avatarHtml = (currentUser.username || '?').slice(0, 2).toUpperCase();
+    }
 
     const sidebarEl = document.createElement('div');
     sidebarEl.id = 'sidebar';
@@ -239,12 +264,17 @@ function renderSidebar() {
                         ${currentUser.role === 'admin' ? 'Time Entries' : 'My Time Log'}
                     </a>
                 </li>
+                <li>
+                    <a href="#settings" class="nav-link" data-page="settings">
+                        <i class="bi bi-gear-fill"></i> Settings
+                    </a>
+                </li>
                 ${adminLinks}
             </ul>
 
             <div class="sidebar-footer">
                 <div class="sidebar-user">
-                    <div class="sidebar-avatar">${initials}</div>
+                    <div class="sidebar-avatar" style="overflow: hidden; padding: 0;">${avatarHtml}</div>
                     <div>
                         <div class="sidebar-username">${currentUser.username}</div>
                         <div class="sidebar-role">${currentUser.role}</div>
@@ -426,7 +456,8 @@ async function renderDashboard() {
     `;
 
     try {
-        const data = await apiCall('dashboard.php');
+        const url = isAdmin ? `dashboard.php?timeframe=${currentAdminTimeframe}` : 'dashboard.php';
+        const data = await apiCall(url);
         isAdmin ? renderAdminDashboard(main, data) : renderUserDashboard(main, data);
     } catch (err) {
         main.innerHTML = `<div class="alert alert-danger"><i class="bi bi-x-circle me-2"></i>${err.message}</div>`;
@@ -470,6 +501,47 @@ function renderAdminDashboard(main, data) {
             </div>
         </div>
     `;
+
+    // Best Employee Summary
+    let bestEmployeeHtml = '';
+    if (data.employee_stats && data.employee_stats.length > 0) {
+        const best = data.employee_stats[0];
+        if (best.total_hours_decimal > 0) {
+            bestEmployeeHtml = `
+                <div class="panel fade-in mb-4" style="background: linear-gradient(135deg, rgba(139, 92, 246, 0.1) 0%, rgba(6, 182, 212, 0.1) 100%); border-color: rgba(139, 92, 246, 0.3);">
+                    <div class="p-4 d-flex align-items-center gap-4">
+                        <div style="width: 70px; height: 70px; border-radius: 18px; background: linear-gradient(135deg, var(--accent), var(--accent2)); display: flex; align-items: center; justify-content: center; font-size: 2.2rem; flex-shrink: 0; box-shadow: 0 12px 30px rgba(139, 92, 246, 0.4);">
+                            <i class="bi bi-trophy-fill text-white"></i>
+                        </div>
+                        <div>
+                            <h3 class="fw-bold mb-1" style="color: #fff; font-size: 1.4rem;">Top Performer: <span style="color: var(--accent-light);">${best.username}</span></h3>
+                            <p class="mb-0 text-secondary">Outstanding contribution with a total of <strong style="color: #fff;">${best.total_hours_formatted}</strong> logged across <strong style="color: #fff;">${best.total_entries}</strong> entries.</p>
+                        </div>
+                    </div>
+                </div>`;
+        }
+    }
+
+    // Chart.js Graph HTML
+    let chartHtml = '';
+    if (data.employee_stats && data.employee_stats.length > 0) {
+        // Calculate dynamic height based on number of users, min 250px
+        const chartHeight = Math.max(250, data.employee_stats.length * 40 + 60);
+        chartHtml = `
+            <div class="panel fade-in mb-4">
+                <div class="panel-header d-flex flex-wrap justify-content-between align-items-center gap-3">
+                    <h3 class="panel-title mb-0"><i class="bi bi-bar-chart-fill me-2" style="color:var(--accent)"></i>Employee Analytics</h3>
+                    <div class="btn-group" role="group">
+                        <button type="button" class="btn ${currentAdminTimeframe === 'all' ? 'btn-primary' : 'btn-secondary'} btn-sm" onclick="setAdminTimeframe('all')">All Time</button>
+                        <button type="button" class="btn ${currentAdminTimeframe === 'yearly' ? 'btn-primary' : 'btn-secondary'} btn-sm" onclick="setAdminTimeframe('yearly')">Yearly</button>
+                        <button type="button" class="btn ${currentAdminTimeframe === 'quarterly' ? 'btn-primary' : 'btn-secondary'} btn-sm" onclick="setAdminTimeframe('quarterly')">Quarterly</button>
+                    </div>
+                </div>
+                <div class="p-4" style="position: relative; height: ${chartHeight}px; width: 100%;">
+                    <canvas id="employeeChart"></canvas>
+                </div>
+            </div>`;
+    }
 
     // Project summary table (top 5 by hours logged)
     let projectTableHtml = '';
@@ -538,10 +610,59 @@ function renderAdminDashboard(main, data) {
             </a>
         </div>
         <div class="row g-3 mb-4">${stats}</div>
+        ${bestEmployeeHtml}
+        ${chartHtml}
         ${projectTableHtml}
         ${recentHtml}
     `;
+
+    // Initialize Chart.js
+    if (data.employee_stats && data.employee_stats.length > 0) {
+        const ctx = document.getElementById('employeeChart');
+        if (ctx) {
+            new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: data.employee_stats.map(e => e.username),
+                    datasets: [{
+                        label: 'Total Hours',
+                        data: data.employee_stats.map(e => e.total_hours_decimal),
+                        backgroundColor: 'rgba(139, 92, 246, 0.6)',
+                        borderColor: 'rgba(139, 92, 246, 1)',
+                        borderWidth: 1,
+                        borderRadius: 6
+                    }]
+                },
+                options: {
+                    indexAxis: 'y',
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: { 
+                            beginAtZero: true,
+                            grid: { color: 'rgba(255,255,255,0.05)' },
+                            ticks: { color: '#94a3b8' },
+                            title: { display: true, text: 'Total Hours', color: '#64748b' }
+                        },
+                        y: {
+                            grid: { display: false },
+                            ticks: { color: '#94a3b8', font: { size: 13 } }
+                        }
+                    },
+                    plugins: {
+                        legend: { display: false }
+                    }
+                }
+            });
+        }
+    }
 }
+
+// Global timeframe setter for onclick
+window.setAdminTimeframe = function(timeframe) {
+    currentAdminTimeframe = timeframe;
+    renderDashboard();
+};
 
 // ── Regular-user dashboard ───────────────────────────────────────────────────
 function renderUserDashboard(main, data) {
@@ -1430,6 +1551,113 @@ async function toggleAssignment(projectId, userId, isChecked, projectName, usern
 
 
 // ══════════════════════════════════════════════════════════════════════════════
+// SETTINGS
+// ══════════════════════════════════════════════════════════════════════════════
+
+function renderSettings() {
+    const main = document.getElementById('main-content');
+    const currentTheme = localStorage.getItem('theme') || 'os';
+
+    main.innerHTML = `
+        <div class="page-header fade-in">
+            <div>
+                <h2 class="page-title">Settings</h2>
+                <p class="page-subtitle">Manage your profile and preferences</p>
+            </div>
+        </div>
+
+        <div class="row fade-in">
+            <div class="col-md-6 mb-4">
+                <div class="panel h-100">
+                    <div class="panel-header"><h3 class="panel-title"><i class="bi bi-person-circle me-2 text-primary"></i>My Profile</h3></div>
+                    <div class="p-4">
+                        <form id="settings-profile-form">
+                            <div class="mb-3">
+                                <label class="form-label">Username</label>
+                                <input type="text" class="form-control" name="username" value="${escAttr(currentUser.username)}" required minlength="3">
+                            </div>
+                            <div class="mb-4">
+                                <label class="form-label">Profile Picture (JPG, PNG, WebP)</label>
+                                <input type="file" class="form-control" name="profile_pic" accept="image/jpeg, image/png, image/webp">
+                            </div>
+                            <button type="submit" class="btn btn-primary" id="btn-save-profile">
+                                <i class="bi bi-save me-2"></i>Save Profile
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-6 mb-4">
+                <div class="panel h-100">
+                    <div class="panel-header"><h3 class="panel-title"><i class="bi bi-palette-fill me-2 text-info"></i>Appearance</h3></div>
+                    <div class="p-4">
+                        <div class="mb-4">
+                            <label class="form-label d-block mb-3">Theme Preference</label>
+                            <div class="btn-group w-100" role="group">
+                                <input type="radio" class="btn-check" name="theme_pref" id="theme-os" value="os" ${currentTheme==='os'?'checked':''}>
+                                <label class="btn btn-outline-secondary" for="theme-os"><i class="bi bi-display me-2"></i>OS Default</label>
+
+                                <input type="radio" class="btn-check" name="theme_pref" id="theme-light" value="light" ${currentTheme==='light'?'checked':''}>
+                                <label class="btn btn-outline-secondary" for="theme-light"><i class="bi bi-sun-fill me-2 text-warning"></i>Light</label>
+
+                                <input type="radio" class="btn-check" name="theme_pref" id="theme-dark" value="dark" ${currentTheme==='dark'?'checked':''}>
+                                <label class="btn btn-outline-secondary" for="theme-dark"><i class="bi bi-moon-stars-fill me-2 text-info"></i>Dark</label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    document.getElementById('settings-profile-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const btn = document.getElementById('btn-save-profile');
+        const originalBtn = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = `<span class="spinner-border spinner-border-sm me-2"></span>Saving...`;
+
+        try {
+            const formData = new FormData(e.target);
+            // using fetch manually since apiCall sends JSON and we need multipart/form-data
+            const res = await fetch('api/settings.php', {
+                method: 'POST',
+                headers: { 'X-CSRF-Token': csrfToken },
+                body: formData
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Failed to update settings');
+
+            if (data.username) currentUser.username = data.username;
+            if (data.profile_pic) currentUser.profile_pic = data.profile_pic;
+
+            showToast('Profile updated successfully!', 'success');
+            route(); // Update sidebar and page cleanly
+        } catch (err) {
+            showToast(err.message, 'error');
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = originalBtn;
+        }
+    });
+
+    document.querySelectorAll('input[name="theme_pref"]').forEach(radio => {
+        radio.addEventListener('change', (e) => {
+            const val = e.target.value;
+            if (val === 'os') {
+                localStorage.removeItem('theme');
+                applyTheme(getInitialTheme());
+            } else {
+                localStorage.setItem('theme', val);
+                applyTheme(val);
+            }
+        });
+    });
+}
+
+
+// ══════════════════════════════════════════════════════════════════════════════
 // UTILITY FUNCTIONS
 // ══════════════════════════════════════════════════════════════════════════════
 
@@ -1495,3 +1723,26 @@ function emptyState(icon, title, text) {
             <div class="empty-state-text">${text}</div>
         </div>`;
 }
+
+// ══════════════════════════════════════════════════════════════════════════════
+// GLOBAL EVENT LISTENERS
+// ══════════════════════════════════════════════════════════════════════════════
+
+document.addEventListener('click', e => {
+    // Mobile menu toggle
+    if (e.target.closest('#mobile-menu-toggle')) {
+        const sidebar = document.querySelector('.sidebar-content');
+        const overlay = document.getElementById('mobile-overlay');
+        if (sidebar) sidebar.classList.toggle('show');
+        if (overlay) overlay.classList.toggle('show');
+    } 
+    // Close mobile menu when clicking overlay or any nav-link
+    else if (e.target.matches('#mobile-overlay') || e.target.closest('.nav-link')) {
+        const sidebar = document.querySelector('.sidebar-content');
+        const overlay = document.getElementById('mobile-overlay');
+        if (sidebar && sidebar.classList.contains('show')) {
+            sidebar.classList.remove('show');
+            if (overlay) overlay.classList.remove('show');
+        }
+    }
+});
