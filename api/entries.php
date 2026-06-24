@@ -8,6 +8,9 @@ requireAuth();
 
 $user = getCurrentUser();
 $method = $_SERVER['REQUEST_METHOD'];
+if (in_array($method, ['POST', 'PUT', 'DELETE'])) {
+    verifyCsrfToken();
+}
 
 switch ($method) {
     case 'GET':
@@ -26,10 +29,14 @@ switch ($method) {
                                      ORDER BY te.entry_date DESC, te.start_time DESC");
             }
         } else {
-            $stmt = $pdo->prepare("SELECT te.* FROM time_entries te 
-                                    LEFT JOIN projects p ON te.project_id = p.id
-                                    WHERE te.user_id = ? 
-                                    ORDER BY te.entry_date DESC, te.start_time DESC");
+            // Regular users see only their own entries; join projects for the project_name column
+            $stmt = $pdo->prepare(
+                "SELECT te.*, p.name AS project_name
+                 FROM time_entries te
+                 LEFT JOIN projects p ON te.project_id = p.id
+                 WHERE te.user_id = ?
+                 ORDER BY te.entry_date DESC, te.start_time DESC"
+            );
             $stmt->execute([$user['id']]);
         }
         $entries = $stmt->fetchAll();
