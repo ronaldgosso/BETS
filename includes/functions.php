@@ -59,7 +59,7 @@ function getCurrentUser() {
     // Update last activity time for valid sessions
     $_SESSION['last_activity'] = time();
     
-    $stmt = $pdo->prepare("SELECT id, username, email, role FROM users WHERE id = ?");
+    $stmt = $pdo->prepare("SELECT id, username, email, role, profile_pic FROM users WHERE id = ?");
     $stmt->execute([$_SESSION['user_id']]);
     return $stmt->fetch();
 }

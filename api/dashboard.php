@@ -64,6 +64,28 @@ if ($user['role'] === 'admin') {
          LIMIT 10"
     )->fetchAll();
 
+    // Timeframe filtering for employee stats
+    $timeframe = $_GET['timeframe'] ?? 'all';
+    $timeFilterSql = "";
+    if ($timeframe === 'yearly') {
+        $timeFilterSql = " WHERE YEAR(te.entry_date) = YEAR(CURDATE())";
+    } elseif ($timeframe === 'quarterly') {
+        $timeFilterSql = " WHERE QUARTER(te.entry_date) = QUARTER(CURDATE()) AND YEAR(te.entry_date) = YEAR(CURDATE())";
+    }
+
+    // Employee statistics: Total hours spent by each user (sorted by most hours first)
+    $data['employee_stats'] = $pdo->query(
+        "SELECT u.id, u.username,
+                COUNT(te.id) as total_entries,
+                ROUND(COALESCE(SUM(TIME_TO_SEC(TIMEDIFF(te.end_time, te.start_time))) / 3600, 0), 2) AS total_hours_decimal,
+                SEC_TO_TIME(COALESCE(SUM(TIME_TO_SEC(TIMEDIFF(te.end_time, te.start_time))), 0)) AS total_hours_formatted
+         FROM users u
+         JOIN time_entries te ON u.id = te.user_id
+         $timeFilterSql
+         GROUP BY u.id, u.username
+         ORDER BY total_hours_decimal DESC"
+    )->fetchAll();
+
 } else {
 
     // ── Regular-user dashboard stats ─────────────────────────────────────────
