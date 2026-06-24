@@ -20,3 +20,10 @@
 /fuel/app/cache/*/*
 /fuel/app/config/crypt.php
 .kilo
+
+# User uploaded files
+uploads/*.jpg
+uploads/*.jpeg
+uploads/*.png
+uploads/*.gif
+uploads/*.webp
