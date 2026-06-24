@@ -1,54 +1,32 @@
-
-// BETS – SPA Router 
+// ──────────────────────────────────────────────────────────────────────────────
+// BETS – Single-Page Application (SPA)
+//
+// Architecture: Hash-based router (#login, #dashboard, #entries, …).
+// All HTML is built in JS and injected into #main-content.
+// API calls go through apiCall() which handles auth errors centrally.
+// Toasts replace all alert() / confirm() feedback.
+//
+// Roles:
+//   admin – can manage Users, Projects and Assignments; reads all time entries.
+//   user  – can only log time entries for projects assigned by an admin.
+// ──────────────────────────────────────────────────────────────────────────────
 
 const API_BASE = 'api/';
-let currentUser = null;
+let currentUser = null; // Populated after every authenticated route change
+let csrfToken = null;
 
-// ----- Toast notification system -----
-function showToast(message, type = 'success', title = null) {
-    const container = document.getElementById('toast-container');
-    if (!container) return;
 
-    const icons = { success: 'bi-check-circle-fill', error: 'bi-x-circle-fill', info: 'bi-info-circle-fill' };
-    const titles = { success: 'Success', error: 'Error', info: 'Info' };
+// ══════════════════════════════════════════════════════════════════════════════
+// ROUTER
+// ══════════════════════════════════════════════════════════════════════════════
 
-    const toast = document.createElement('div');
-    toast.className = `bets-toast toast-${type}`;
-    toast.innerHTML = `
-        <div class="bets-toast-icon"><i class="bi ${icons[type] || icons.info}"></i></div>
-        <div class="bets-toast-body">
-            <div class="bets-toast-title">${title || titles[type]}</div>
-            <div class="bets-toast-message">${message}</div>
-        </div>
-    `;
-    container.appendChild(toast);
-
-    setTimeout(() => {
-        toast.classList.add('hiding');
-        setTimeout(() => toast.remove(), 350);
-    }, 3800);
-}
-
-// ----- Skeleton helpers -----
-function skeletonStats(n = 3) {
-    return Array.from({ length: n }, () =>
-        `<div class="col-md-4"><div class="skeleton skeleton-stat"></div></div>`
-    ).join('');
-}
-
-function skeletonRows(n = 5) {
-    return Array.from({ length: n }, () =>
-        `<div class="skeleton skeleton-row"></div>`
-    ).join('');
-}
-
-// ----- Router -----
 async function route() {
     const hash = location.hash.slice(1) || 'login';
     const main = document.getElementById('main-content');
-    main.innerHTML = '';
+    main.innerHTML = ''; // Clear previous page content
 
-    // SECURITY: Always verify authentication before rendering protected pages
+    // Every protected page must verify the session first.
+    // If the server says the user is not authenticated, redirect to login.
     try {
         if (hash !== 'login' && hash !== 'signup') {
             currentUser = await fetchUser();
@@ -59,33 +37,34 @@ async function route() {
         return;
     }
 
-    // Auth pages get a special body class for the gradient background
-    if (hash === 'login' || hash === 'signup') {
-        document.body.classList.add('auth-page');
-    } else {
-        document.body.classList.remove('auth-page');
-    }
+    // Toggle the special animated background used on auth pages
+    document.body.classList.toggle('auth-page', hash === 'login' || hash === 'signup');
 
-    // SECURITY: Clear sidebar and re-render for each navigation
+    // Rebuild the sidebar on every navigation so role-based links are always fresh.
+    // The old #sidebar element is removed completely before re-rendering.
     document.getElementById('sidebar')?.remove();
-
     if (currentUser && hash !== 'login' && hash !== 'signup') {
         renderSidebar();
         updateActiveNav(hash);
     }
 
+    // Dispatch to the correct page renderer
     switch (hash) {
-        case 'login':         renderLogin();                                          break;
-        case 'signup':        renderSignup();                                         break;
-        case 'dashboard':     renderDashboard();                                      break;
-        case 'entries':       renderEntries();                                        break;
+        case 'login':              renderLogin();                                                      break;
+        case 'signup':             renderSignup();                                                     break;
+        case 'dashboard':          renderDashboard();                                                  break;
+        case 'entries':            renderEntries();                                                    break;
+        case 'admin/projects':
+            if (currentUser?.role !== 'admin') { location.hash = '#dashboard'; return; }
+            renderAdminProjects();
+            break;
         case 'admin/users':
             if (currentUser?.role !== 'admin') { location.hash = '#dashboard'; return; }
             renderAdminUsers();
             break;
-        case 'admin/projects':
+        case 'admin/assignments':
             if (currentUser?.role !== 'admin') { location.hash = '#dashboard'; return; }
-            renderAdminProjects();
+            renderAdminAssignments();
             break;
         default:
             location.hash = '#login';
@@ -95,31 +74,42 @@ async function route() {
 window.addEventListener('hashchange', route);
 window.addEventListener('load', route);
 
-// ----- API Helpers -----
+
+// ══════════════════════════════════════════════════════════════════════════════
+// API HELPER
+// ══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Central fetch wrapper.
+ * – Automatically sets Content-Type and includes cookies (credentials: 'include').
+ * – Redirects to #login on 401 (session expired).
+ * – Shows a toast on 403 (forbidden).
+ * – Throws a typed Error with the server's message for all other failures.
+ */
 async function apiCall(endpoint, method = 'GET', body = null) {
     const options = {
         method,
         headers: { 'Content-Type': 'application/json' },
-        credentials: 'include'
+        credentials: 'include' // Send session cookie with every request
     };
+    if (csrfToken && ['POST', 'PUT', 'DELETE'].includes(method.toUpperCase())) {
+        options.headers['X-CSRF-Token'] = csrfToken;
+    }
     if (body) options.body = JSON.stringify(body);
+
     const res = await fetch(API_BASE + endpoint, options);
 
-    // Log debug headers
-    console.log('Response debug headers:', {
-        'X-Debug-Projects-Count': res.headers.get('X-Debug-Projects-Count'),
-        'X-Debug-Total-Assignments': res.headers.get('X-Debug-Total-Assignments'),
-        'X-Debug-Current-User-Id': res.headers.get('X-Debug-Current-User-Id'),
-        'X-Debug-Requested-User-Id': res.headers.get('X-Debug-Requested-User-Id'),
-        'X-Debug-Session-Id': res.headers.get('X-Debug-Session-Id'),
-        'X-Debug-Auth': res.headers.get('X-Debug-Auth'),
-        'X-Debug-User-Id': res.headers.get('X-Debug-User-Id'),
-        status: res.status
-    });
-
-    if (res.status === 401) { currentUser = null; location.hash = '#login'; throw new Error('Unauthorized'); }
-    if (res.status === 403) { showToast('Access denied.', 'error'); throw new Error('Forbidden'); }
+    if (res.status === 401) {
+        currentUser = null;
+        location.hash = '#login';
+        throw new Error('Session expired. Please log in again.');
+    }
+    if (res.status === 403) {
+        showToast('You do not have permission to do that.', 'error');
+        throw new Error('Forbidden');
+    }
     if (!res.ok) {
+        // Try to parse the server's JSON error message; fall back to HTTP status
         let err;
         try { err = await res.json(); } catch { throw new Error(`Request failed (${res.status})`); }
         throw new Error(err.error || 'Request failed');
@@ -127,20 +117,105 @@ async function apiCall(endpoint, method = 'GET', body = null) {
     return res.json();
 }
 
+/** Fetches the current user from /api/me.php. Returns null if not logged in. */
 async function fetchUser() {
     try {
         const data = await apiCall('me.php');
+        if (data.csrf_token) csrfToken = data.csrf_token;
         return data.user;
     } catch (e) {
         return null;
     }
 }
 
-// ----- Sidebar -----
+
+// ══════════════════════════════════════════════════════════════════════════════
+// TOAST NOTIFICATIONS
+// Replaces browser alert()/confirm() with non-blocking slide-in toasts.
+// ══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Display a toast notification.
+ * @param {string} message  – Main body text
+ * @param {'success'|'error'|'info'} type – Controls icon and colour
+ * @param {string|null} title – Optional override for the bold heading
+ */
+function showToast(message, type = 'success', title = null) {
+    const container = document.getElementById('toast-container');
+    if (!container) return;
+
+    const icons  = { success: 'bi-check-circle-fill', error: 'bi-x-circle-fill', info: 'bi-info-circle-fill' };
+    const titles = { success: 'Done',                 error: 'Error',            info: 'Info'               };
+
+    const toast = document.createElement('div');
+    toast.className = `bets-toast toast-${type}`;
+    toast.innerHTML = `
+        <div class="bets-toast-icon"><i class="bi ${icons[type] || icons.info}"></i></div>
+        <div class="bets-toast-body">
+            <div class="bets-toast-title">${title ?? titles[type]}</div>
+            <div class="bets-toast-message">${message}</div>
+        </div>
+    `;
+    container.appendChild(toast);
+
+    // Auto-dismiss after 3.8 s with a CSS exit animation
+    setTimeout(() => {
+        toast.classList.add('hiding');
+        setTimeout(() => toast.remove(), 350);
+    }, 3800);
+}
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// SKELETON LOADERS
+// Shown immediately while API data is being fetched so the page never looks blank.
+// ══════════════════════════════════════════════════════════════════════════════
+
+/** Returns n skeleton stat-card placeholders (for the stats row). */
+function skeletonStats(n = 3) {
+    return Array.from({ length: n }, () =>
+        `<div class="col-md-3"><div class="skeleton skeleton-stat"></div></div>`
+    ).join('');
+}
+
+/** Returns n skeleton row placeholders (for table/list areas). */
+function skeletonRows(n = 5) {
+    return Array.from({ length: n }, () =>
+        `<div class="skeleton skeleton-row"></div>`
+    ).join('');
+}
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// SIDEBAR NAVIGATION
+// ══════════════════════════════════════════════════════════════════════════════
+
 function renderSidebar() {
+    // Generate initials from the username for the avatar circle
     const initials = (currentUser.username || '?').slice(0, 2).toUpperCase();
+
     const sidebarEl = document.createElement('div');
     sidebarEl.id = 'sidebar';
+
+    // Admin sees extra management links; regular users only see their own pages
+    const adminLinks = currentUser.role === 'admin' ? `
+        <li class="sidebar-section-label">Administration</li>
+        <li>
+            <a href="#admin/projects" class="nav-link" data-page="admin/projects">
+                <i class="bi bi-folder-fill"></i> Projects
+            </a>
+        </li>
+        <li>
+            <a href="#admin/users" class="nav-link" data-page="admin/users">
+                <i class="bi bi-people-fill"></i> Users
+            </a>
+        </li>
+        <li>
+            <a href="#admin/assignments" class="nav-link" data-page="admin/assignments">
+                <i class="bi bi-diagram-3-fill"></i> Assignments
+            </a>
+        </li>` : '';
+
     sidebarEl.innerHTML = `
         <div class="sidebar-content">
             <a href="#dashboard" class="sidebar-brand">
@@ -160,21 +235,11 @@ function renderSidebar() {
                 </li>
                 <li>
                     <a href="#entries" class="nav-link" data-page="entries">
-                        <i class="bi bi-journal-text"></i> Time Entries
+                        <i class="bi bi-journal-text"></i>
+                        ${currentUser.role === 'admin' ? 'Time Entries' : 'My Time Log'}
                     </a>
                 </li>
-                ${currentUser.role === 'admin' ? `
-                <li class="sidebar-section-label">Admin</li>
-                <li>
-                    <a href="#admin/projects" class="nav-link" data-page="admin/projects">
-                        <i class="bi bi-folder-fill"></i> Projects
-                    </a>
-                </li>
-                <li>
-                    <a href="#admin/users" class="nav-link" data-page="admin/users">
-                        <i class="bi bi-people-fill"></i> Users
-                    </a>
-                </li>` : ''}
+                ${adminLinks}
             </ul>
 
             <div class="sidebar-footer">
@@ -194,23 +259,24 @@ function renderSidebar() {
     document.getElementById('app').prepend(sidebarEl);
 }
 
+/** Highlights the link in the sidebar that matches the current page hash. */
 function updateActiveNav(page) {
     document.querySelectorAll('#sidebar .nav-link').forEach(link => {
         link.classList.toggle('active', link.getAttribute('data-page') === page);
     });
 }
 
-// ----- Logout -----
 async function logout() {
     await apiCall('logout.php', 'POST');
+    currentUser = null;
     location.hash = '#login';
 }
 
-// ======================================================
-// AUTH PAGES
-// ======================================================
 
-// ----- Login -----
+// ══════════════════════════════════════════════════════════════════════════════
+// AUTH PAGES – LOGIN & SIGNUP
+// ══════════════════════════════════════════════════════════════════════════════
+
 function renderLogin() {
     const main = document.getElementById('main-content');
     main.innerHTML = `
@@ -249,16 +315,18 @@ function renderLogin() {
         const btn  = document.getElementById('login-btn');
         const err  = document.getElementById('login-error');
         err.classList.add('d-none');
+
         btn.disabled = true;
         btn.innerHTML = `<span class="spinner-border spinner-border-sm me-2"></span>Signing in…`;
         try {
-            await apiCall('login.php', 'POST', {
+            const data = await apiCall('login.php', 'POST', {
                 username: form.username.value,
                 password: form.password.value
             });
+            if (data.csrf_token) csrfToken = data.csrf_token;
             location.hash = '#dashboard';
         } catch (e) {
-            err.textContent = e.message;
+            err.innerHTML = `<i class="bi bi-exclamation-triangle me-2"></i>${e.message}`;
             err.classList.remove('d-none');
             btn.disabled = false;
             btn.innerHTML = `<i class="bi bi-arrow-right-circle"></i> Sign In`;
@@ -266,7 +334,6 @@ function renderLogin() {
     });
 }
 
-// ----- Signup -----
 function renderSignup() {
     const main = document.getElementById('main-content');
     main.innerHTML = `
@@ -281,18 +348,18 @@ function renderSignup() {
 
                 <form id="signup-form" autocomplete="on">
                     <div class="mb-3">
-                        <label class="form-label" for="signup-username">Username</label>
-                        <input id="signup-username" type="text" class="form-control" name="username"
+                        <label class="form-label" for="su-username">Username</label>
+                        <input id="su-username" type="text" class="form-control" name="username"
                                required minlength="3" placeholder="At least 3 characters" autocomplete="username">
                     </div>
                     <div class="mb-3">
-                        <label class="form-label" for="signup-email">Email</label>
-                        <input id="signup-email" type="email" class="form-control" name="email"
+                        <label class="form-label" for="su-email">Email</label>
+                        <input id="su-email" type="email" class="form-control" name="email"
                                required placeholder="you@example.com" autocomplete="email">
                     </div>
                     <div class="mb-4">
-                        <label class="form-label" for="signup-password">Password</label>
-                        <input id="signup-password" type="password" class="form-control" name="password"
+                        <label class="form-label" for="su-password">Password</label>
+                        <input id="su-password" type="password" class="form-control" name="password"
                                required minlength="6" placeholder="At least 6 characters" autocomplete="new-password">
                     </div>
                     <button type="submit" id="signup-btn" class="btn btn-primary">
@@ -313,6 +380,7 @@ function renderSignup() {
         const succDiv = document.getElementById('signup-success');
         errDiv.classList.add('d-none');
         succDiv.classList.add('d-none');
+
         btn.disabled = true;
         btn.innerHTML = `<span class="spinner-border spinner-border-sm me-2"></span>Creating…`;
         try {
@@ -333,148 +401,288 @@ function renderSignup() {
     });
 }
 
-// ======================================================
-// DASHBOARD
-// ======================================================
+
+// ══════════════════════════════════════════════════════════════════════════════
+// DASHBOARD – Admin view and User view diverge significantly here
+// ══════════════════════════════════════════════════════════════════════════════
+
 async function renderDashboard() {
-    const main = document.getElementById('main-content');
+    const main    = document.getElementById('main-content');
     const isAdmin = currentUser.role === 'admin';
 
-    // Skeleton while loading
+    // Show skeleton placeholders immediately so the page doesn't look blank
     main.innerHTML = `
         <div class="page-header fade-in">
             <div>
                 <h2 class="page-title">Dashboard</h2>
-                <p class="page-subtitle">Welcome back, ${currentUser.username} 👋</p>
+                <p class="page-subtitle">Welcome back, <strong>${currentUser.username}</strong> 👋</p>
             </div>
         </div>
-        <div class="row g-3 mb-4">${skeletonStats(isAdmin ? 3 : 2)}</div>
+        <div class="row g-3 mb-4">${skeletonStats(isAdmin ? 4 : 3)}</div>
         <div class="panel fade-in">
-            <div class="panel-header"><h3 class="panel-title">Recent Entries</h3></div>
+            <div class="panel-header"><h3 class="panel-title">Loading…</h3></div>
             <div class="p-4">${skeletonRows(5)}</div>
         </div>
     `;
 
     try {
         const data = await apiCall('dashboard.php');
-
-        let statsHtml = '';
-        if (isAdmin) {
-            statsHtml = `
-                <div class="col-md-4">
-                    <div class="stat-card stat-violet fade-in">
-                        <div class="stat-card-icon"><i class="bi bi-people-fill"></i></div>
-                        <div class="stat-card-value">${data.total_users}</div>
-                        <div class="stat-card-label">Total Users</div>
-                    </div>
-                </div>
-                <div class="col-md-4">
-                    <div class="stat-card stat-cyan fade-in">
-                        <div class="stat-card-icon"><i class="bi bi-calendar-check-fill"></i></div>
-                        <div class="stat-card-value">${data.entries_today}</div>
-                        <div class="stat-card-label">Entries Today</div>
-                    </div>
-                </div>
-                <div class="col-md-4">
-                    <div class="stat-card stat-emerald fade-in">
-                        <div class="stat-card-icon"><i class="bi bi-clock-fill"></i></div>
-                        <div class="stat-card-value">${data.total_hours_today}</div>
-                        <div class="stat-card-label">Hours Logged Today</div>
-                    </div>
-                </div>`;
-        } else {
-            statsHtml = `
-                <div class="col-md-6">
-                    <div class="stat-card stat-cyan fade-in">
-                        <div class="stat-card-icon"><i class="bi bi-calendar-check-fill"></i></div>
-                        <div class="stat-card-value">${data.entries_today}</div>
-                        <div class="stat-card-label">My Entries Today</div>
-                    </div>
-                </div>
-                <div class="col-md-6">
-                    <div class="stat-card stat-emerald fade-in">
-                        <div class="stat-card-icon"><i class="bi bi-clock-fill"></i></div>
-                        <div class="stat-card-value">${data.total_hours_today}</div>
-                        <div class="stat-card-label">My Hours Today</div>
-                    </div>
-                </div>`;
-        }
-
-        let tableHtml = '';
-        if (data.recent_entries.length > 0) {
-            const rows = data.recent_entries.map(e => `
-                <tr>
-                    ${isAdmin ? `<td><span class="fw-500">${e.username}</span></td>` : ''}
-                    <td><span class="fw-500">${e.project_name}</span></td>
-                    <td>${formatDate(e.entry_date)}</td>
-                    <td>${formatTime(e.start_time)}</td>
-                    <td>${formatTime(e.end_time)}</td>
-                </tr>`).join('');
-
-            tableHtml = `
-                <div style="overflow-x:auto;">
-                <table class="bets-table">
-                    <thead>
-                        <tr>
-                            ${isAdmin ? '<th>User</th>' : ''}
-                            <th>Project</th><th>Date</th><th>Start</th><th>End</th>
-                        </tr>
-                    </thead>
-                    <tbody>${rows}</tbody>
-                </table>
-                </div>`;
-        } else {
-            tableHtml = `
-                <div class="empty-state">
-                    <i class="bi bi-journal-x empty-state-icon"></i>
-                    <div class="empty-state-title">No recent entries</div>
-                    <div class="empty-state-text">Time entries will appear here once logged.</div>
-                </div>`;
-        }
-
-        main.innerHTML = `
-            <div class="page-header fade-in">
-                <div>
-                    <h2 class="page-title">Dashboard</h2>
-                    <p class="page-subtitle">Welcome back, ${currentUser.username} 👋</p>
-                </div>
-            </div>
-            <div class="row g-3 mb-4">${statsHtml}</div>
-            <div class="panel fade-in">
-                <div class="panel-header">
-                    <h3 class="panel-title"><i class="bi bi-clock-history me-2" style="color:var(--accent)"></i>Recent Entries</h3>
-                </div>
-                ${tableHtml}
-            </div>
-        `;
+        isAdmin ? renderAdminDashboard(main, data) : renderUserDashboard(main, data);
     } catch (err) {
-        main.innerHTML = `<div class="alert alert-danger"><i class="bi bi-x-circle"></i>${err.message}</div>`;
+        main.innerHTML = `<div class="alert alert-danger"><i class="bi bi-x-circle me-2"></i>${err.message}</div>`;
     }
 }
 
-// ======================================================
-// TIME ENTRIES
-// ======================================================
-let userProjects = [];
+// ── Admin dashboard ──────────────────────────────────────────────────────────
+function renderAdminDashboard(main, data) {
 
-async function renderEntries() {
-    const main = document.getElementById('main-content');
+    // 4 stat cards: Users / Projects / Entries today / Hours today
+    const stats = `
+        <div class="col-md-3">
+            <div class="stat-card stat-violet fade-in">
+                <div class="stat-card-icon"><i class="bi bi-people-fill"></i></div>
+                <div class="stat-card-value">${data.total_users}</div>
+                <div class="stat-card-label">Total Users</div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="stat-card stat-cyan fade-in">
+                <div class="stat-card-icon"><i class="bi bi-folder-fill"></i></div>
+                <div class="stat-card-value">${data.total_projects}</div>
+                <div class="stat-card-label">Projects</div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="stat-card stat-emerald fade-in">
+                <div class="stat-card-icon"><i class="bi bi-calendar-check-fill"></i></div>
+                <div class="stat-card-value">${data.entries_today}</div>
+                <div class="stat-card-label">Entries Today</div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="stat-card stat-amber fade-in">
+                <div class="stat-card-icon"><i class="bi bi-clock-fill"></i></div>
+                <div class="stat-card-value">${formatTime24(data.total_hours_today)}</div>
+                <div class="stat-card-label">Hours Today</div>
+                ${data.unassigned_users > 0
+                    ? `<div class="stat-card-badge"><i class="bi bi-exclamation-triangle-fill me-1"></i>${data.unassigned_users} user${data.unassigned_users > 1 ? 's' : ''} unassigned</div>`
+                    : ''}
+            </div>
+        </div>
+    `;
+
+    // Project summary table (top 5 by hours logged)
+    let projectTableHtml = '';
+    if (data.project_summary && data.project_summary.length > 0) {
+        const rows = data.project_summary.map(p => `
+            <tr>
+                <td><span class="fw-500">${p.project_name}</span></td>
+                <td>${p.assigned_users}</td>
+                <td>${p.total_entries}</td>
+                <td><code>${formatTime24(p.total_hours)}</code></td>
+            </tr>`).join('');
+
+        projectTableHtml = `
+            <div class="panel fade-in mb-4">
+                <div class="panel-header">
+                    <h3 class="panel-title"><i class="bi bi-folder me-2" style="color:var(--accent2)"></i>Project Hours Summary</h3>
+                    <a href="#admin/projects" class="btn btn-secondary btn-sm">View all</a>
+                </div>
+                <div style="overflow-x:auto;">
+                <table class="bets-table">
+                    <thead><tr><th>Project</th><th>Users</th><th>Entries</th><th>Total Hours</th></tr></thead>
+                    <tbody>${rows}</tbody>
+                </table>
+                </div>
+            </div>`;
+    }
+
+    // Recent entries from all users
+    let recentHtml = '';
+    if (data.recent_entries && data.recent_entries.length > 0) {
+        const rows = data.recent_entries.map(e => `
+            <tr>
+                <td><span class="fw-500">${e.username}</span></td>
+                <td>${e.project_name || '—'}</td>
+                <td>${formatDate(e.entry_date)}</td>
+                <td>${formatTime(e.start_time)}</td>
+                <td>${formatTime(e.end_time)}</td>
+            </tr>`).join('');
+
+        recentHtml = `
+            <div class="panel fade-in">
+                <div class="panel-header">
+                    <h3 class="panel-title"><i class="bi bi-clock-history me-2" style="color:var(--accent)"></i>Recent Entries</h3>
+                    <a href="#entries" class="btn btn-secondary btn-sm">View all</a>
+                </div>
+                <div style="overflow-x:auto;">
+                <table class="bets-table">
+                    <thead><tr><th>User</th><th>Project</th><th>Date</th><th>Start</th><th>End</th></tr></thead>
+                    <tbody>${rows}</tbody>
+                </table>
+                </div>
+            </div>`;
+    } else {
+        recentHtml = emptyState('bi-journal-x', 'No entries yet', 'Time entries logged by your team will appear here.');
+        recentHtml = `<div class="panel fade-in"><div class="panel-header"><h3 class="panel-title">Recent Entries</h3></div>${recentHtml}</div>`;
+    }
+
     main.innerHTML = `
         <div class="page-header fade-in">
             <div>
-                <h2 class="page-title">Time Entries</h2>
-                <p class="page-subtitle">Track and manage your logged time</p>
+                <h2 class="page-title">Admin Dashboard</h2>
+                <p class="page-subtitle">Overview of all team activity</p>
             </div>
-            ${currentUser.role !== 'admin'
-                ? `<button class="btn btn-primary" id="add-entry-btn" onclick="showEntryForm()">
-                       <i class="bi bi-plus-lg"></i> Add Entry
-                   </button>` : ''}
+            <a href="#admin/assignments" class="btn btn-primary">
+                <i class="bi bi-diagram-3-fill"></i> Manage Assignments
+            </a>
+        </div>
+        <div class="row g-3 mb-4">${stats}</div>
+        ${projectTableHtml}
+        ${recentHtml}
+    `;
+}
+
+// ── Regular-user dashboard ───────────────────────────────────────────────────
+function renderUserDashboard(main, data) {
+    const hasProjects = data.assigned_projects > 0;
+
+    // 3 stat cards: Today entries / Today hours / Week hours
+    const stats = `
+        <div class="col-md-4">
+            <div class="stat-card stat-cyan fade-in">
+                <div class="stat-card-icon"><i class="bi bi-calendar-check-fill"></i></div>
+                <div class="stat-card-value">${data.entries_today}</div>
+                <div class="stat-card-label">My Entries Today</div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="stat-card stat-emerald fade-in">
+                <div class="stat-card-icon"><i class="bi bi-clock-fill"></i></div>
+                <div class="stat-card-value">${formatTime24(data.total_hours_today)}</div>
+                <div class="stat-card-label">Hours Today</div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="stat-card stat-violet fade-in">
+                <div class="stat-card-icon"><i class="bi bi-graph-up"></i></div>
+                <div class="stat-card-value">${formatTime24(data.total_hours_week)}</div>
+                <div class="stat-card-label">Hours This Week</div>
+            </div>
+        </div>
+    `;
+
+    // Assigned projects mini-cards (or a call-to-action if none assigned yet)
+    let projectsHtml = '';
+    if (!hasProjects) {
+        projectsHtml = `
+            <div class="panel fade-in mb-4">
+                <div class="panel-header"><h3 class="panel-title">My Projects</h3></div>
+                <div class="empty-state">
+                    <i class="bi bi-folder-x empty-state-icon"></i>
+                    <div class="empty-state-title">No projects assigned yet</div>
+                    <div class="empty-state-text">Contact your admin to get assigned to a project before you can log time.</div>
+                </div>
+            </div>`;
+    } else {
+        const cards = data.my_projects.map(p => `
+            <div class="col-md-4">
+                <div class="project-mini-card fade-in">
+                    <div class="project-mini-icon"><i class="bi bi-folder-fill"></i></div>
+                    <div class="project-mini-name">${p.name}</div>
+                    <div class="project-mini-desc">${p.description || 'No description'}</div>
+                    <div class="project-mini-count"><i class="bi bi-clock me-1"></i>${p.my_entries} ${p.my_entries === 1 ? 'entry' : 'entries'} logged</div>
+                </div>
+            </div>`).join('');
+
+        projectsHtml = `
+            <div class="panel fade-in mb-4">
+                <div class="panel-header">
+                    <h3 class="panel-title"><i class="bi bi-folder me-2" style="color:var(--accent2)"></i>My Projects</h3>
+                    <a href="#entries" class="btn btn-primary btn-sm"><i class="bi bi-plus-lg"></i> Log Time</a>
+                </div>
+                <div class="p-3"><div class="row g-3">${cards}</div></div>
+            </div>`;
+    }
+
+    // Recent personal entries
+    let recentHtml = '';
+    if (data.recent_entries && data.recent_entries.length > 0) {
+        const rows = data.recent_entries.map(e => `
+            <tr>
+                <td><span class="fw-500">${e.project_name || '—'}</span></td>
+                <td>${formatDate(e.entry_date)}</td>
+                <td>${formatTime(e.start_time)}</td>
+                <td>${formatTime(e.end_time)}</td>
+                <td class="text-muted" style="font-size:0.8rem;">${calcDuration(e.start_time, e.end_time)}</td>
+            </tr>`).join('');
+
+        recentHtml = `
+            <div class="panel fade-in">
+                <div class="panel-header">
+                    <h3 class="panel-title"><i class="bi bi-clock-history me-2" style="color:var(--accent)"></i>Recent Entries</h3>
+                    <a href="#entries" class="btn btn-secondary btn-sm">View all</a>
+                </div>
+                <div style="overflow-x:auto;">
+                <table class="bets-table">
+                    <thead><tr><th>Project</th><th>Date</th><th>Start</th><th>End</th><th>Duration</th></tr></thead>
+                    <tbody>${rows}</tbody>
+                </table>
+                </div>
+            </div>`;
+    } else {
+        recentHtml = `
+            <div class="panel fade-in">
+                <div class="panel-header"><h3 class="panel-title">Recent Entries</h3></div>
+                ${emptyState('bi-journal-x', 'No entries yet', hasProjects ? 'Click "Log Time" to record your first entry.' : 'You need a project assigned before you can log time.')}
+            </div>`;
+    }
+
+    main.innerHTML = `
+        <div class="page-header fade-in">
+            <div>
+                <h2 class="page-title">My Dashboard</h2>
+                <p class="page-subtitle">Welcome back, <strong>${currentUser.username}</strong> 👋</p>
+            </div>
+            ${hasProjects ? `<a href="#entries" class="btn btn-primary"><i class="bi bi-plus-lg"></i> Log Time</a>` : ''}
+        </div>
+        <div class="row g-3 mb-4">${stats}</div>
+        ${projectsHtml}
+        ${recentHtml}
+    `;
+}
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// TIME ENTRIES PAGE
+// Admins see a read-only view of ALL entries.
+// Users see only their own entries and can add/edit/delete them — but ONLY if
+// they have been assigned at least one project by an admin.
+// ══════════════════════════════════════════════════════════════════════════════
+
+let userProjects = []; // Cached list of projects assigned to the current user
+
+async function renderEntries() {
+    const main    = document.getElementById('main-content');
+    const isAdmin = currentUser.role === 'admin';
+
+    main.innerHTML = `
+        <div class="page-header fade-in">
+            <div>
+                <h2 class="page-title">${isAdmin ? 'All Time Entries' : 'My Time Log'}</h2>
+                <p class="page-subtitle">${isAdmin ? 'Read-only view of all employee time entries' : 'Log and manage your personal work hours'}</p>
+            </div>
+            ${!isAdmin ? `
+                <button class="btn btn-primary" id="add-entry-btn" onclick="showEntryForm()">
+                    <i class="bi bi-plus-lg"></i> Add Entry
+                </button>` : ''}
         </div>
         <div class="panel fade-in">
-            <div id="entries-list" class="p-4">${skeletonRows(6)}</div>
+            <div id="entries-list" class="p-4">${skeletonRows(7)}</div>
         </div>
 
-        <!-- Entry Modal -->
+        <!-- Add / Edit entry modal (only rendered for non-admins) -->
+        ${!isAdmin ? `
         <div class="modal fade" id="entryModal" tabindex="-1">
             <div class="modal-dialog">
                 <div class="modal-content">
@@ -492,8 +700,12 @@ async function renderEntries() {
                                 </select>
                             </div>
                             <div class="mb-3">
-                                <label class="form-label">Task Description <span class="text-muted fw-normal">(optional)</span></label>
-                                <textarea name="task_description" class="form-control" placeholder="Describe the work done…"></textarea>
+                                <label class="form-label">
+                                    Task Description
+                                    <span class="text-muted fw-normal">(optional)</span>
+                                </label>
+                                <textarea name="task_description" class="form-control"
+                                          placeholder="What did you work on?"></textarea>
                             </div>
                             <div class="mb-3">
                                 <label class="form-label">Date</label>
@@ -519,79 +731,82 @@ async function renderEntries() {
                     </div>
                 </div>
             </div>
-        </div>
+        </div>` : ''}
     `;
 
-    await loadUserProjects();
-    await loadEntriesList();
+    // For regular users: load their assigned projects before rendering the list.
+    // If they have none, we block the Add button and show a warning.
+    if (!isAdmin) {
+        await loadUserProjects();
 
-    const addBtn = document.getElementById('add-entry-btn');
-    if (addBtn && userProjects.length === 0) {
-        addBtn.disabled = true;
-        addBtn.title = 'No projects assigned. Please contact the admin.';
+        const addBtn = document.getElementById('add-entry-btn');
+        if (addBtn && userProjects.length === 0) {
+            addBtn.disabled = true;
+            addBtn.title = 'Contact admin to get a project assigned first.';
+        }
     }
+
+    await loadEntriesList();
 }
 
+/** Fetches the projects assigned to the current (non-admin) user and stores them. */
 async function loadUserProjects() {
-    // SECURITY: Only load projects for non-admin users
-    if (currentUser.role === 'admin') return;
+    if (currentUser.role === 'admin') return; // Admins do not log entries
     try {
-        console.log('Fetching projects for user_id:', currentUser.id);
         const response = await apiCall(`assignments.php?user_id=${currentUser.id}`);
-        console.log('Raw response:', response);
         userProjects = Array.isArray(response) ? response : [];
     } catch (err) {
-        console.error('Failed to load projects:', err.message);
         userProjects = [];
     }
 }
 
+/** Renders the entries table into #entries-list. */
 async function loadEntriesList() {
     const listDiv = document.getElementById('entries-list');
+    const isAdmin = currentUser.role === 'admin';
 
-    // SECURITY: Show warning if user has no projects assigned (non-admins only)
-    if (currentUser.role !== 'admin' && userProjects.length === 0) {
-        listDiv.innerHTML = `
-            <div class="empty-state">
-                <i class="bi bi-folder-x empty-state-icon"></i>
-                <div class="empty-state-title">No projects assigned</div>
-                <div class="empty-state-text">Contact your admin to get a project assigned.</div>
-            </div>`;
+    // Block non-admin users who have no project assigned at all
+    if (!isAdmin && userProjects.length === 0) {
+        listDiv.innerHTML = emptyState(
+            'bi-folder-x',
+            'No projects assigned',
+            'You cannot log time until an admin assigns you to a project.'
+        );
         return;
     }
 
     try {
         const entries = await apiCall('entries.php');
+
         if (entries.length === 0) {
-            listDiv.innerHTML = `
-                <div class="empty-state">
-                    <i class="bi bi-journal-x empty-state-icon"></i>
-                    <div class="empty-state-title">No time entries yet</div>
-                    <div class="empty-state-text">Click "Add Entry" to log your first entry.</div>
-                </div>`;
+            listDiv.innerHTML = emptyState(
+                'bi-journal-x',
+                'No time entries yet',
+                isAdmin ? 'Entries logged by your team will appear here.' : 'Click "Add Entry" to log your first entry.'
+            );
             return;
         }
 
-        const isAdmin = currentUser.role === 'admin';
         const rows = entries.map(e => `
             <tr>
                 ${isAdmin ? `<td><span class="fw-500">${e.username}</span></td>` : ''}
-                <td><span class="fw-500">${e.project_name}</span></td>
+                <td><span class="fw-500">${e.project_name || '—'}</span></td>
                 <td>${formatDate(e.entry_date)}</td>
                 <td>${formatTime(e.start_time)}</td>
                 <td>${formatTime(e.end_time)}</td>
+                <td class="text-muted" style="font-size:0.8rem;">${calcDuration(e.start_time, e.end_time)}</td>
                 <td>
                     ${!isAdmin ? `
                         <button class="tbl-action tbl-action-edit"
-                            onclick="editEntry(${e.id}, ${e.project_id || 'null'}, '${escAttr(e.task_description || '')}', '${e.entry_date}', '${e.start_time}', '${e.end_time}')"
-                            title="Edit">
+                            onclick="editEntry(${e.id}, ${e.project_id ?? 'null'}, '${escAttr(e.task_description || '')}', '${e.entry_date}', '${e.start_time}', '${e.end_time}')"
+                            title="Edit this entry">
                             <i class="bi bi-pencil-fill"></i>
                         </button>
                         <button class="tbl-action tbl-action-delete"
                             onclick="deleteEntry(${e.id})"
-                            title="Delete">
+                            title="Delete this entry">
                             <i class="bi bi-trash-fill"></i>
-                        </button>` : ''}
+                        </button>` : '<span class="text-muted">—</span>'}
                 </td>
             </tr>`).join('');
 
@@ -601,32 +816,42 @@ async function loadEntriesList() {
                 <thead>
                     <tr>
                         ${isAdmin ? '<th>User</th>' : ''}
-                        <th>Project</th><th>Date</th><th>Start</th><th>End</th><th>Actions</th>
+                        <th>Project</th>
+                        <th>Date</th>
+                        <th>Start</th>
+                        <th>End</th>
+                        <th>Duration</th>
+                        <th>Actions</th>
                     </tr>
                 </thead>
                 <tbody>${rows}</tbody>
             </table>
             </div>`;
     } catch (err) {
-        listDiv.innerHTML = `<div class="alert alert-danger"><i class="bi bi-x-circle"></i> ${err.message}</div>`;
+        listDiv.innerHTML = `<div class="alert alert-danger"><i class="bi bi-x-circle me-2"></i>${err.message}</div>`;
     }
 }
 
+/** Opens the Add/Edit entry modal pre-filled with the given values (all blank for new). */
 function showEntryForm(id = null, projectId = null, task = '', date = '', start = '', end = '') {
+    // Double-check: user must have at least one project (the button should already be disabled)
     if (userProjects.length === 0) {
-        showToast('No project assigned. Please contact the admin.', 'error');
+        showToast('No project assigned. Contact your admin.', 'error');
         return;
     }
 
-    const modal = new bootstrap.Modal(document.getElementById('entryModal'));
-    document.getElementById('entryModalLabel').textContent = id ? 'Edit Entry' : 'Add Entry';
-    const form = document.getElementById('entry-form');
-    form.id.value              = id || '';
-    form.task_description.value = task;
-    form.entry_date.value      = date;
-    form.start_time.value      = start;
-    form.end_time.value        = end;
+    const modal  = new bootstrap.Modal(document.getElementById('entryModal'));
+    const form   = document.getElementById('entry-form');
+    const saveBtn = document.getElementById('save-entry-btn');
 
+    document.getElementById('entryModalLabel').textContent = id ? 'Edit Entry' : 'Add Entry';
+    form.id.value               = id || '';
+    form.task_description.value = task;
+    form.entry_date.value       = date;
+    form.start_time.value       = start;
+    form.end_time.value         = end;
+
+    // Rebuild the project dropdown from the cached list of assigned projects
     const select = document.getElementById('project-select');
     select.innerHTML = '<option value="">Select a project…</option>';
     userProjects.forEach(p => {
@@ -637,9 +862,8 @@ function showEntryForm(id = null, projectId = null, task = '', date = '', start 
         select.appendChild(opt);
     });
 
-    const saveBtn = document.getElementById('save-entry-btn');
     saveBtn.onclick = async () => {
-        const f = document.getElementById('entry-form');
+        const f    = document.getElementById('entry-form');
         const body = {
             project_id:       f.project_id.value,
             task_description: f.task_description.value,
@@ -647,18 +871,20 @@ function showEntryForm(id = null, projectId = null, task = '', date = '', start 
             start_time:       f.start_time.value,
             end_time:         f.end_time.value
         };
+        saveBtn.disabled = true;
+        saveBtn.innerHTML = `<span class="spinner-border spinner-border-sm me-1"></span>Saving…`;
         try {
-            saveBtn.disabled = true;
-            saveBtn.innerHTML = `<span class="spinner-border spinner-border-sm me-1"></span>Saving…`;
             if (f.id.value) {
+                // Editing an existing entry
                 await apiCall(`entries.php?id=${f.id.value}`, 'PUT', body);
-                showToast('Entry updated successfully.', 'success');
+                showToast('Entry updated.', 'success');
             } else {
+                // Creating a new entry
                 await apiCall('entries.php', 'POST', body);
-                showToast('Entry added successfully.', 'success');
+                showToast('Entry logged.', 'success');
             }
             modal.hide();
-            loadEntriesList();
+            loadEntriesList(); // Refresh the list without a full page reload
         } catch (err) {
             showToast(err.message, 'error');
         } finally {
@@ -674,7 +900,7 @@ function editEntry(id, projectId, task, date, start, end) {
 }
 
 async function deleteEntry(id) {
-    if (!confirm('Delete this time entry?')) return;
+    if (!confirm('Delete this time entry? This cannot be undone.')) return;
     try {
         await apiCall(`entries.php?id=${id}`, 'DELETE');
         showToast('Entry deleted.', 'info');
@@ -684,31 +910,34 @@ async function deleteEntry(id) {
     }
 }
 
-// ======================================================
+
+// ══════════════════════════════════════════════════════════════════════════════
 // ADMIN – PROJECTS
-// ======================================================
+// Admins can create, edit, delete projects and assign users directly here.
+// ══════════════════════════════════════════════════════════════════════════════
+
 async function renderAdminProjects() {
     const main = document.getElementById('main-content');
     main.innerHTML = `
         <div class="page-header fade-in">
             <div>
                 <h2 class="page-title">Projects</h2>
-                <p class="page-subtitle">Manage projects and team assignments</p>
+                <p class="page-subtitle">Create and manage projects; assign them to team members</p>
             </div>
             <button class="btn btn-primary" onclick="showProjectForm()">
-                <i class="bi bi-plus-lg"></i> Add Project
+                <i class="bi bi-plus-lg"></i> New Project
             </button>
         </div>
         <div class="panel fade-in">
             <div id="projects-list" class="p-4">${skeletonRows(5)}</div>
         </div>
 
-        <!-- Project Modal -->
+        <!-- Add / Edit project modal -->
         <div class="modal fade" id="projectModal" tabindex="-1">
             <div class="modal-dialog">
                 <div class="modal-content">
                     <div class="modal-header">
-                        <h5 class="modal-title" id="projectModalLabel">Add Project</h5>
+                        <h5 class="modal-title" id="projectModalLabel">New Project</h5>
                         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                     </div>
                     <div class="modal-body">
@@ -716,24 +945,30 @@ async function renderAdminProjects() {
                             <input type="hidden" name="id">
                             <div class="mb-3">
                                 <label class="form-label">Project Name</label>
-                                <input type="text" name="name" class="form-control" required placeholder="e.g. Website Redesign">
+                                <input type="text" name="name" class="form-control"
+                                       required placeholder="e.g. Website Redesign">
                             </div>
                             <div class="mb-3">
-                                <label class="form-label">Description <span class="text-muted fw-normal">(optional)</span></label>
-                                <textarea name="description" class="form-control" placeholder="Brief description…"></textarea>
+                                <label class="form-label">
+                                    Description
+                                    <span class="text-muted fw-normal">(optional)</span>
+                                </label>
+                                <textarea name="description" class="form-control"
+                                          placeholder="Brief description…"></textarea>
                             </div>
                             <div class="mb-3">
                                 <label class="form-label">Assign to Users</label>
-                                <select name="user_ids" class="form-select" multiple id="user-ids-select" style="height:140px;">
+                                <select name="user_ids" class="form-select" multiple
+                                        id="user-ids-select" style="height:130px;">
                                 </select>
-                                <small class="text-muted">Hold Ctrl / Cmd to select multiple</small>
+                                <small class="text-muted">Hold Ctrl / Cmd to select multiple users</small>
                             </div>
                         </form>
                     </div>
                     <div class="modal-footer">
                         <button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
                         <button class="btn btn-primary" id="save-project-btn">
-                            <i class="bi bi-check-lg"></i> Save Project
+                            <i class="bi bi-check-lg"></i> Save
                         </button>
                     </div>
                 </div>
@@ -747,36 +982,32 @@ async function loadProjectsList() {
     const listDiv = document.getElementById('projects-list');
     try {
         const projects = await apiCall('projects.php');
+
         if (projects.length === 0) {
-            listDiv.innerHTML = `
-                <div class="empty-state">
-                    <i class="bi bi-folder-x empty-state-icon"></i>
-                    <div class="empty-state-title">No projects yet</div>
-                    <div class="empty-state-text">Create your first project to get started.</div>
-                </div>`;
+            listDiv.innerHTML = emptyState('bi-folder-x', 'No projects yet', 'Create your first project to get started.');
             return;
         }
 
         const rows = projects.map(p => {
-            const assignedUsers = p.assigned_users || 0;
+            const assigned = p.assigned_users || 0;
             return `<tr>
                 <td><span class="fw-500">${p.name}</span></td>
                 <td class="text-muted">${p.description || '<em>—</em>'}</td>
                 <td>
-                    <span class="badge-role badge-user">
-                        <i class="bi bi-person"></i> ${assignedUsers} user${assignedUsers !== 1 ? 's' : ''}
+                    <span class="badge-role ${assigned > 0 ? 'badge-admin' : 'badge-user'}">
+                        <i class="bi bi-person"></i> ${assigned} user${assigned !== 1 ? 's' : ''}
                     </span>
                 </td>
                 <td class="text-muted" style="font-size:0.8rem;">${formatDate(p.created_at)}</td>
                 <td>
                     <button class="tbl-action tbl-action-edit"
                         onclick="editProject(${p.id}, '${escAttr(p.name)}', '${escAttr(p.description || '')}')"
-                        title="Edit">
+                        title="Edit project">
                         <i class="bi bi-pencil-fill"></i>
                     </button>
                     <button class="tbl-action tbl-action-delete"
                         onclick="deleteProject(${p.id})"
-                        title="Delete">
+                        title="Delete project">
                         <i class="bi bi-trash-fill"></i>
                     </button>
                 </td>
@@ -787,45 +1018,46 @@ async function loadProjectsList() {
             <div style="overflow-x:auto;">
             <table class="bets-table">
                 <thead>
-                    <tr><th>Project</th><th>Description</th><th>Assigned</th><th>Created</th><th>Actions</th></tr>
+                    <tr><th>Name</th><th>Description</th><th>Assigned</th><th>Created</th><th>Actions</th></tr>
                 </thead>
                 <tbody>${rows}</tbody>
             </table>
             </div>`;
     } catch (err) {
-        listDiv.innerHTML = `<div class="alert alert-danger"><i class="bi bi-x-circle"></i> ${err.message}</div>`;
+        listDiv.innerHTML = `<div class="alert alert-danger"><i class="bi bi-x-circle me-2"></i>${err.message}</div>`;
     }
 }
 
+/** Populates the multi-select inside the project modal with all users. */
 async function loadUsersForSelection(selectedIds = []) {
     const select = document.getElementById('user-ids-select');
     select.innerHTML = '';
     const users = await apiCall('users.php');
-    console.log('Available users for assignment:', users);
     users.forEach(u => {
         const opt = document.createElement('option');
         opt.value = u.id;
-        opt.textContent = u.username;
+        opt.textContent = `${u.username} (${u.role})`;
         if (selectedIds.includes(u.id)) opt.selected = true;
         select.appendChild(opt);
     });
 }
 
+/** Returns the IDs of users currently assigned to a project. */
 async function loadAssignedUsers(projectId) {
     try {
         const assignments = await apiCall(`assignments.php?project_id=${projectId}`);
-        console.log('Assigned users for project', projectId, ':', assignments);
         return assignments.map(a => a.id);
-    } catch (err) {
-        console.error('Failed to load assigned users:', err);
+    } catch {
         return [];
     }
 }
 
 function showProjectForm(id = null, name = '', description = '', userIds = []) {
-    const modal = new bootstrap.Modal(document.getElementById('projectModal'));
-    document.getElementById('projectModalLabel').textContent = id ? 'Edit Project' : 'Add Project';
-    const form = document.getElementById('project-form');
+    const modal   = new bootstrap.Modal(document.getElementById('projectModal'));
+    const form    = document.getElementById('project-form');
+    const saveBtn = document.getElementById('save-project-btn');
+
+    document.getElementById('projectModalLabel').textContent = id ? 'Edit Project' : 'New Project';
     form.id.value          = id || '';
     form.name.value        = name;
     form.description.value = description;
@@ -833,16 +1065,14 @@ function showProjectForm(id = null, name = '', description = '', userIds = []) {
     loadUsersForSelection(userIds);
     modal.show();
 
-    const saveBtn = document.getElementById('save-project-btn');
     saveBtn.onclick = async () => {
-        const f      = document.getElementById('project-form');
-        const select = document.getElementById('user-ids-select');
+        const f              = document.getElementById('project-form');
+        const select         = document.getElementById('user-ids-select');
         const selectedUserIds = Array.from(select.selectedOptions).map(o => parseInt(o.value));
-        console.log('Saving project - selected user_ids:', selectedUserIds);
-        console.log('Select element options count:', select.options.length);
 
+        // At least one user must be selected when creating or editing a project
         if (selectedUserIds.length === 0) {
-            showToast('Please select at least one user.', 'error');
+            showToast('Please assign at least one user to this project.', 'error');
             return;
         }
 
@@ -851,16 +1081,16 @@ function showProjectForm(id = null, name = '', description = '', userIds = []) {
             description: f.description.value,
             user_ids:    selectedUserIds
         };
-        console.log('Request body:', body);
+
+        saveBtn.disabled = true;
+        saveBtn.innerHTML = `<span class="spinner-border spinner-border-sm me-1"></span>Saving…`;
         try {
-            saveBtn.disabled = true;
-            saveBtn.innerHTML = `<span class="spinner-border spinner-border-sm me-1"></span>Saving…`;
             if (f.id.value) {
                 await apiCall(`projects.php?id=${f.id.value}`, 'PUT', body);
                 showToast('Project updated.', 'success');
             } else {
                 await apiCall('projects.php', 'POST', body);
-                showToast('Project created.', 'success');
+                showToast('Project created and users assigned.', 'success');
             }
             modal.hide();
             loadProjectsList();
@@ -868,19 +1098,18 @@ function showProjectForm(id = null, name = '', description = '', userIds = []) {
             showToast(err.message, 'error');
         } finally {
             saveBtn.disabled = false;
-            saveBtn.innerHTML = `<i class="bi bi-check-lg"></i> Save Project`;
+            saveBtn.innerHTML = `<i class="bi bi-check-lg"></i> Save`;
         }
     };
 }
 
 function editProject(id, name, description) {
-    loadAssignedUsers(id).then(userIds => {
-        showProjectForm(id, name, description, userIds);
-    });
+    // First load the currently assigned users, then open the modal with those pre-selected
+    loadAssignedUsers(id).then(userIds => showProjectForm(id, name, description, userIds));
 }
 
 async function deleteProject(id) {
-    if (!confirm('Delete this project? All related data will be removed.')) return;
+    if (!confirm('Delete this project? All related assignments and entries will be affected.')) return;
     try {
         await apiCall(`projects.php?id=${id}`, 'DELETE');
         showToast('Project deleted.', 'info');
@@ -890,16 +1119,18 @@ async function deleteProject(id) {
     }
 }
 
-// ======================================================
+
+// ══════════════════════════════════════════════════════════════════════════════
 // ADMIN – USERS
-// ======================================================
+// ══════════════════════════════════════════════════════════════════════════════
+
 async function renderAdminUsers() {
     const main = document.getElementById('main-content');
     main.innerHTML = `
         <div class="page-header fade-in">
             <div>
                 <h2 class="page-title">User Administration</h2>
-                <p class="page-subtitle">Manage team members and roles</p>
+                <p class="page-subtitle">Manage team member accounts and roles</p>
             </div>
             <button class="btn btn-primary" onclick="showUserForm()">
                 <i class="bi bi-plus-lg"></i> Add User
@@ -909,7 +1140,7 @@ async function renderAdminUsers() {
             <div id="users-list" class="p-4">${skeletonRows(6)}</div>
         </div>
 
-        <!-- User Modal -->
+        <!-- Add / Edit user modal -->
         <div class="modal fade" id="userModal" tabindex="-1">
             <div class="modal-dialog">
                 <div class="modal-content">
@@ -922,18 +1153,21 @@ async function renderAdminUsers() {
                             <input type="hidden" name="id">
                             <div class="mb-3">
                                 <label class="form-label">Username</label>
-                                <input type="text" name="username" class="form-control" required placeholder="Enter username">
+                                <input type="text" name="username" class="form-control"
+                                       required placeholder="Enter username">
                             </div>
                             <div class="mb-3">
                                 <label class="form-label">Email</label>
-                                <input type="email" name="email" class="form-control" required placeholder="user@example.com">
+                                <input type="email" name="email" class="form-control"
+                                       required placeholder="user@example.com">
                             </div>
                             <div class="mb-3">
                                 <label class="form-label">
                                     Password
-                                    <span class="text-muted fw-normal">(leave blank to keep unchanged)</span>
+                                    <span class="text-muted fw-normal" id="pw-hint">(leave blank to keep unchanged)</span>
                                 </label>
-                                <input type="password" name="password" class="form-control" placeholder="At least 6 characters">
+                                <input type="password" name="password" class="form-control"
+                                       placeholder="At least 6 characters">
                             </div>
                             <div class="mb-3">
                                 <label class="form-label">Role</label>
@@ -947,7 +1181,7 @@ async function renderAdminUsers() {
                     <div class="modal-footer">
                         <button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
                         <button class="btn btn-primary" id="save-user-btn">
-                            <i class="bi bi-check-lg"></i> Save User
+                            <i class="bi bi-check-lg"></i> Save
                         </button>
                     </div>
                 </div>
@@ -961,13 +1195,9 @@ async function loadUsersList() {
     const listDiv = document.getElementById('users-list');
     try {
         const users = await apiCall('users.php');
+
         if (users.length === 0) {
-            listDiv.innerHTML = `
-                <div class="empty-state">
-                    <i class="bi bi-people empty-state-icon"></i>
-                    <div class="empty-state-title">No users yet</div>
-                    <div class="empty-state-text">Add the first user to get started.</div>
-                </div>`;
+            listDiv.innerHTML = emptyState('bi-people', 'No users yet', 'Add the first team member.');
             return;
         }
 
@@ -986,12 +1216,12 @@ async function loadUsersList() {
                 <td>
                     <button class="tbl-action tbl-action-edit"
                         onclick="editUser(${u.id}, '${escAttr(u.username)}', '${escAttr(u.email)}', '${u.role}')"
-                        title="Edit">
+                        title="Edit user">
                         <i class="bi bi-pencil-fill"></i>
                     </button>
                     <button class="tbl-action tbl-action-delete"
                         onclick="deleteUser(${u.id})"
-                        title="Delete">
+                        title="Delete user">
                         <i class="bi bi-trash-fill"></i>
                     </button>
                 </td>
@@ -1007,22 +1237,26 @@ async function loadUsersList() {
             </table>
             </div>`;
     } catch (err) {
-        listDiv.innerHTML = `<div class="alert alert-danger"><i class="bi bi-x-circle"></i> ${err.message}</div>`;
+        listDiv.innerHTML = `<div class="alert alert-danger"><i class="bi bi-x-circle me-2"></i>${err.message}</div>`;
     }
 }
 
 function showUserForm(id = null, username = '', email = '', role = 'user') {
-    const modal = new bootstrap.Modal(document.getElementById('userModal'));
+    const modal   = new bootstrap.Modal(document.getElementById('userModal'));
+    const form    = document.getElementById('user-form');
+    const saveBtn = document.getElementById('save-user-btn');
+
     document.getElementById('userModalLabel').textContent = id ? 'Edit User' : 'Add User';
-    const form = document.getElementById('user-form');
+    // Hide the "(leave blank…)" hint on new user forms — password is required there
+    document.getElementById('pw-hint').style.display = id ? '' : 'none';
+
     form.id.value       = id || '';
     form.username.value = username;
     form.email.value    = email;
     form.password.value = '';
     form.role.value     = role;
-    form.password.required = !id;
+    form.password.required = !id; // Required only when creating a new account
 
-    const saveBtn = document.getElementById('save-user-btn');
     saveBtn.onclick = async () => {
         const f    = document.getElementById('user-form');
         const body = {
@@ -1031,9 +1265,10 @@ function showUserForm(id = null, username = '', email = '', role = 'user') {
             role:     f.role.value
         };
         if (f.password.value) body.password = f.password.value;
+
+        saveBtn.disabled = true;
+        saveBtn.innerHTML = `<span class="spinner-border spinner-border-sm me-1"></span>Saving…`;
         try {
-            saveBtn.disabled = true;
-            saveBtn.innerHTML = `<span class="spinner-border spinner-border-sm me-1"></span>Saving…`;
             if (f.id.value) {
                 await apiCall(`users.php?id=${f.id.value}`, 'PUT', body);
                 showToast('User updated.', 'success');
@@ -1047,7 +1282,7 @@ function showUserForm(id = null, username = '', email = '', role = 'user') {
             showToast(err.message, 'error');
         } finally {
             saveBtn.disabled = false;
-            saveBtn.innerHTML = `<i class="bi bi-check-lg"></i> Save User`;
+            saveBtn.innerHTML = `<i class="bi bi-check-lg"></i> Save`;
         }
     };
     modal.show();
@@ -1058,7 +1293,7 @@ function editUser(id, username, email, role) {
 }
 
 async function deleteUser(id) {
-    if (!confirm('Delete this user? All their entries will be removed.')) return;
+    if (!confirm('Delete this user and all their time entries?')) return;
     try {
         await apiCall(`users.php?id=${id}`, 'DELETE');
         showToast('User deleted.', 'info');
@@ -1068,25 +1303,195 @@ async function deleteUser(id) {
     }
 }
 
-// ======================================================
-// UTILITIES
-// ======================================================
 
-// Escape attribute values for inline onclick strings
-function escAttr(str) {
-    return String(str).replace(/'/g, "\\'").replace(/"/g, '&quot;');
+// ══════════════════════════════════════════════════════════════════════════════
+// ADMIN – ASSIGNMENTS
+// Dedicated page to quickly assign/remove users from projects.
+// This is the primary way admins control who can log time on which project.
+// ══════════════════════════════════════════════════════════════════════════════
+
+async function renderAdminAssignments() {
+    const main = document.getElementById('main-content');
+    main.innerHTML = `
+        <div class="page-header fade-in">
+            <div>
+                <h2 class="page-title">Assignments</h2>
+                <p class="page-subtitle">Control which users can log time on each project</p>
+            </div>
+        </div>
+        <div class="row g-3" id="assignments-grid">
+            ${skeletonStats(3)}
+        </div>
+    `;
+
+    try {
+        // Load projects and users in parallel for speed
+        const [projects, users] = await Promise.all([
+            apiCall('projects.php'),
+            apiCall('users.php')
+        ]);
+
+        // Only regular users can be assigned (admins don't log time)
+        const regularUsers = users.filter(u => u.role === 'user');
+
+        if (projects.length === 0) {
+            document.getElementById('assignments-grid').innerHTML =
+                emptyState('bi-folder-x', 'No projects yet', 'Create a project first before assigning users.');
+            return;
+        }
+
+        // Render one card per project, each with its own assignment checkboxes
+        const cards = projects.map(p => `
+            <div class="col-md-6 col-lg-4">
+                <div class="panel assignment-card fade-in" data-project-id="${p.id}">
+                    <div class="panel-header">
+                        <div>
+                            <h3 class="panel-title">${p.name}</h3>
+                            <div class="text-muted" style="font-size:0.75rem;">${p.description || 'No description'}</div>
+                        </div>
+                        <span class="badge-role badge-admin" id="count-${p.id}">${p.assigned_users} user${p.assigned_users !== 1 ? 's' : ''}</span>
+                    </div>
+                    <div class="p-3" id="users-for-${p.id}">
+                        ${regularUsers.length === 0
+                            ? '<div class="text-muted" style="font-size:0.82rem;">No regular users exist yet.</div>'
+                            : regularUsers.map(u => `
+                                <label class="assignment-row" id="assign-label-${p.id}-${u.id}">
+                                    <input type="checkbox"
+                                        id="assign-${p.id}-${u.id}"
+                                        onchange="toggleAssignment(${p.id}, ${u.id}, this.checked, '${escAttr(p.name)}', '${escAttr(u.username)}')"
+                                        style="accent-color:var(--accent);">
+                                    <span class="assignment-username">${u.username}</span>
+                                    <span class="assignment-email">${u.email}</span>
+                                </label>`).join('')}
+                    </div>
+                </div>
+            </div>
+        `).join('');
+
+        document.getElementById('assignments-grid').innerHTML = `<div class="col-12"><div class="row g-3">${cards}</div></div>`;
+
+        // Now load the current assignment state for every project and tick the right checkboxes
+        await Promise.all(projects.map(async p => {
+            try {
+                const assigned = await apiCall(`assignments.php?project_id=${p.id}`);
+                const assignedIds = assigned.map(a => a.id);
+                assignedIds.forEach(uid => {
+                    const cb = document.getElementById(`assign-${p.id}-${uid}`);
+                    if (cb) cb.checked = true;
+                });
+            } catch { /* silently skip if a single project fails */ }
+        }));
+
+    } catch (err) {
+        document.getElementById('assignments-grid').innerHTML =
+            `<div class="col-12"><div class="alert alert-danger"><i class="bi bi-x-circle me-2"></i>${err.message}</div></div>`;
+    }
 }
 
-// Format ISO date to "May 28, 2026"
+/**
+ * Called when a checkbox on the Assignments page changes.
+ * Adds or removes the user-project assignment via the API.
+ */
+async function toggleAssignment(projectId, userId, isChecked, projectName, username) {
+    const cb    = document.getElementById(`assign-${projectId}-${userId}`);
+    const label = document.getElementById(`assign-label-${projectId}-${userId}`);
+
+    // Visually disable the checkbox while the request is in flight
+    if (cb) cb.disabled = true;
+    if (label) label.classList.add('assignment-row--saving');
+
+    try {
+        if (isChecked) {
+            // Assign the user to the project
+            await apiCall('assignments.php', 'POST', { user_id: userId, project_id: projectId });
+            showToast(`${username} assigned to "${projectName}".`, 'success');
+        } else {
+            // Remove the user from the project
+            await apiCall(`assignments.php?user_id=${userId}&project_id=${projectId}`, 'DELETE');
+            showToast(`${username} removed from "${projectName}".`, 'info');
+        }
+
+        // Update the user-count badge on that project's card
+        const countBadge = document.getElementById(`count-${projectId}`);
+        if (countBadge) {
+            const currentCount = parseInt(countBadge.textContent) || 0;
+            const newCount = isChecked ? currentCount + 1 : Math.max(0, currentCount - 1);
+            countBadge.textContent = `${newCount} user${newCount !== 1 ? 's' : ''}`;
+        }
+    } catch (err) {
+        // Revert the checkbox if the API call failed
+        if (cb) cb.checked = !isChecked;
+        showToast(err.message, 'error');
+    } finally {
+        if (cb) cb.disabled = false;
+        if (label) label.classList.remove('assignment-row--saving');
+    }
+}
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// UTILITY FUNCTIONS
+// ══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Escape single-quotes and double-quotes for safe embedding inside
+ * inline onclick="…" attributes. Prevents XSS via data from the server.
+ */
+function escAttr(str) {
+    return String(str).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+}
+
+/** Format an ISO / SQL date string to "May 28, 2026". */
 function formatDate(str) {
     if (!str) return '—';
     try {
-        return new Date(str).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+        return new Date(str).toLocaleDateString('en-US', {
+            year: 'numeric', month: 'short', day: 'numeric'
+        });
     } catch { return str; }
 }
 
-// Format "HH:MM:SS" to "HH:MM"
+/** Trim "HH:MM:SS" → "HH:MM" (removes seconds). */
 function formatTime(str) {
     if (!str) return '—';
-    return str.slice(0, 5);
+    return String(str).slice(0, 5);
+}
+
+/** Format "HH:MM:SS" to "Xh YYm" (e.g. "3h 45m") for human-friendly display. */
+function formatTime24(str) {
+    if (!str || str === '00:00:00') return '0h 00m';
+    const parts = String(str).split(':');
+    const h = parseInt(parts[0], 10);
+    const m = parseInt(parts[1], 10);
+    return `${h}h ${String(m).padStart(2, '0')}m`;
+}
+
+/**
+ * Calculate the duration between two "HH:MM" or "HH:MM:SS" strings.
+ * Returns a formatted string like "2h 30m".
+ */
+function calcDuration(start, end) {
+    if (!start || !end) return '—';
+    try {
+        const toMins = t => {
+            const [h, m] = t.split(':').map(Number);
+            return h * 60 + m;
+        };
+        const diff = toMins(end) - toMins(start);
+        if (diff <= 0) return '—';
+        return `${Math.floor(diff / 60)}h ${String(diff % 60).padStart(2, '0')}m`;
+    } catch { return '—'; }
+}
+
+/**
+ * Returns the HTML for an empty-state placeholder.
+ * Used when a list/table has no rows to display.
+ */
+function emptyState(icon, title, text) {
+    return `
+        <div class="empty-state">
+            <i class="bi ${icon} empty-state-icon"></i>
+            <div class="empty-state-title">${title}</div>
+            <div class="empty-state-text">${text}</div>
+        </div>`;
 }
