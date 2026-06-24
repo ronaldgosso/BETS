@@ -40,6 +40,7 @@ $result = [
         'id' => $user['id'],
         'username' => $user['username'],
         'role' => $user['role']
-    ]
+    ],
+    'csrf_token' => generateCsrfToken()
 ];
 jsonResponse($result);

@@ -86,3 +86,40 @@ function requireRole($role) {
         jsonResponse(['error' => 'Forbidden'], 403);
     }
 }
+
+/**
+ * Generate a CSRF token and store it in the session.
+ */
+function generateCsrfToken() {
+    if (empty($_SESSION['csrf_token'])) {
+        $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+    }
+    return $_SESSION['csrf_token'];
+}
+
+/**
+ * Verify the CSRF token from the X-CSRF-Token header against the session.
+ */
+function verifyCsrfToken() {
+    $token = '';
+    
+    // Check $_SERVER first (works consistently across web servers)
+    if (isset($_SERVER['HTTP_X_CSRF_TOKEN'])) {
+        $token = $_SERVER['HTTP_X_CSRF_TOKEN'];
+    } else {
+        // Fallback to getallheaders
+        if (function_exists('getallheaders')) {
+            $headers = getallheaders();
+            foreach ($headers as $name => $value) {
+                if (strtolower($name) === 'x-csrf-token') {
+                    $token = $value;
+                    break;
+                }
+            }
+        }
+    }
+    
+    if (empty($_SESSION['csrf_token']) || empty($token) || !hash_equals($_SESSION['csrf_token'], $token)) {
+        jsonResponse(['error' => 'Invalid CSRF token'], 403);
+    }
+}

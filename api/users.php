@@ -4,6 +4,9 @@ requireAuth();
 requireRole('admin'); // Only admins can access this endpoint
 
 $method = $_SERVER['REQUEST_METHOD'];
+if (in_array($method, ['POST', 'PUT', 'DELETE'])) {
+    verifyCsrfToken();
+}
 
 switch ($method) {
     case 'GET':

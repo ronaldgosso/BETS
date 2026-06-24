@@ -8,4 +8,7 @@ $user = getCurrentUser();
 if (!$user) {
     jsonResponse(['error' => 'Not authenticated'], 401);
 }
-jsonResponse(['user' => $user]);
+jsonResponse([
+    'user' => $user,
+    'csrf_token' => generateCsrfToken()
+]);

@@ -2,14 +2,14 @@
 // Session cookie settings for proper session handling (must be set before session_start)
 // Note: session_set_cookie_params must be called before session_start
 $cookieParams = session_get_cookie_params();
-if ($cookieParams['lifetime'] !== 0 || $cookieParams['path'] !== '/' || $cookieParams['httponly'] !== true) {
+if ($cookieParams['lifetime'] !== 0 || $cookieParams['path'] !== '/' || $cookieParams['httponly'] !== true || $cookieParams['samesite'] !== 'Strict') {
     session_set_cookie_params([
         'lifetime' => 0,
         'path' => '/',
         'domain' => $_SERVER['HTTP_HOST'] ?? '',
         'secure' => false,
         'httponly' => true,
-        'samesite' => 'Lax'
+        'samesite' => 'Strict'
     ]);
 }
 

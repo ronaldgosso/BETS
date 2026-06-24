@@ -4,6 +4,9 @@ requireAuth();
 $currentUser = getCurrentUser();
 
 $method = $_SERVER['REQUEST_METHOD'];
+if (in_array($method, ['POST', 'PUT', 'DELETE'])) {
+    verifyCsrfToken();
+}
 
 switch ($method) {
     case 'GET':
